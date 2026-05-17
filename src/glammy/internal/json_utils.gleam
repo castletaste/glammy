@@ -1,0 +1,81 @@
+//// Shared JSON-building helpers. Internal to glammy — not part of the
+//// public API.
+
+import gleam/dynamic/decode.{type Decoder}
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
+
+// =====================================================================
+//                       Encoder helpers (pipe-friendly)
+// =====================================================================
+
+/// Append `(key, encode(value))` to an existing field list, but only if
+/// `value` is `Some`. Designed for the pipe-builder pattern.
+pub fn put_optional(
+  fields: List(#(String, json.Json)),
+  key: String,
+  value: Option(a),
+  encode: fn(a) -> json.Json,
+) -> List(#(String, json.Json)) {
+  case value {
+    None -> fields
+    Some(v) -> list.append(fields, [#(key, encode(v))])
+  }
+}
+
+/// Like `put_optional` but the value is already a `json.Json`.
+pub fn put_optional_json(
+  fields: List(#(String, json.Json)),
+  key: String,
+  value: Option(json.Json),
+) -> List(#(String, json.Json)) {
+  case value {
+    None -> fields
+    Some(v) -> list.append(fields, [#(key, v)])
+  }
+}
+
+// =====================================================================
+//                       Decoder helpers (use-friendly)
+// =====================================================================
+
+/// Decoder helper for `optional_field(key, None, decode.optional(decode.string))`
+/// — the most common shape when modelling Telegram types. Use with `<-`:
+/// `use name <- opt_str("name")`.
+pub fn opt_str(
+  key: String,
+  next: fn(Option(String)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(key, None, decode.optional(decode.string), next)
+}
+
+pub fn opt_int(key: String, next: fn(Option(Int)) -> Decoder(t)) -> Decoder(t) {
+  decode.optional_field(key, None, decode.optional(decode.int), next)
+}
+
+pub fn opt_bool(
+  key: String,
+  next: fn(Option(Bool)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(key, None, decode.optional(decode.bool), next)
+}
+
+pub fn opt_float(
+  key: String,
+  next: fn(Option(Float)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(key, None, decode.optional(decode.float), next)
+}
+
+/// `optional_field(key, default, decoder, next)` — for cases where the
+/// field is optional but you want a non-`Option` default (e.g. `[]` for
+/// arrays).
+pub fn opt_with_default(
+  key: String,
+  default: t,
+  decoder: Decoder(t),
+  next: fn(t) -> Decoder(u),
+) -> Decoder(u) {
+  decode.optional_field(key, default, decoder, next)
+}
