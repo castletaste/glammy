@@ -12,6 +12,7 @@
 //// Both are built up row-by-row using a pipe-friendly builder pattern,
 //// and both support `transpose`, `flow`, and `append` post-processors.
 
+import glammy/internal/json_utils.{put_optional}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -169,9 +170,7 @@ fn add_inline_button(
 pub fn inline_rows(
   keyboard: InlineKeyboard,
 ) -> List(List(InlineKeyboardButton)) {
-  keyboard.reversed_rows
-  |> list.reverse
-  |> list.filter(fn(row) { row != [] })
+  materialise_rows(keyboard.reversed_rows)
 }
 
 /// Transpose the keyboard — flip rows and columns. Idempotent under
@@ -261,24 +260,20 @@ fn inline_button_to_json(button: InlineKeyboardButton) -> json.Json {
 fn login_url_to_json(url: LoginUrl) -> json.Json {
   json.object(
     [#("url", json.string(url.url))]
-    |> append_optional("forward_text", url.forward_text, json.string)
-    |> append_optional("bot_username", url.bot_username, json.string)
-    |> append_optional(
-      "request_write_access",
-      url.request_write_access,
-      json.bool,
-    ),
+    |> put_optional("forward_text", url.forward_text, json.string)
+    |> put_optional("bot_username", url.bot_username, json.string)
+    |> put_optional("request_write_access", url.request_write_access, json.bool),
   )
 }
 
 fn switch_inline_chosen_chat_to_json(o: SwitchInlineChosenChat) -> json.Json {
   json.object(
     []
-    |> append_optional("query", o.query, json.string)
-    |> append_optional("allow_user_chats", o.allow_user_chats, json.bool)
-    |> append_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
-    |> append_optional("allow_group_chats", o.allow_group_chats, json.bool)
-    |> append_optional("allow_channel_chats", o.allow_channel_chats, json.bool),
+    |> put_optional("query", o.query, json.string)
+    |> put_optional("allow_user_chats", o.allow_user_chats, json.bool)
+    |> put_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
+    |> put_optional("allow_group_chats", o.allow_group_chats, json.bool)
+    |> put_optional("allow_channel_chats", o.allow_channel_chats, json.bool),
   )
 }
 
@@ -438,9 +433,7 @@ fn add_reply_button(
 }
 
 pub fn reply_rows(keyboard: ReplyKeyboard) -> List(List(ReplyKeyboardButton)) {
-  keyboard.reversed_rows
-  |> list.reverse
-  |> list.filter(fn(row) { row != [] })
+  materialise_rows(keyboard.reversed_rows)
 }
 
 pub fn reply_transpose(keyboard: ReplyKeyboard) -> ReplyKeyboard {
@@ -477,11 +470,11 @@ pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
   ]
   let with_extras =
     base
-    |> append_optional("resize_keyboard", keyboard.resize, json.bool)
-    |> append_optional("one_time_keyboard", keyboard.one_time, json.bool)
-    |> append_optional("selective", keyboard.selective, json.bool)
-    |> append_optional("is_persistent", keyboard.is_persistent, json.bool)
-    |> append_optional(
+    |> put_optional("resize_keyboard", keyboard.resize, json.bool)
+    |> put_optional("one_time_keyboard", keyboard.one_time, json.bool)
+    |> put_optional("selective", keyboard.selective, json.bool)
+    |> put_optional("is_persistent", keyboard.is_persistent, json.bool)
+    |> put_optional(
       "input_field_placeholder",
       keyboard.input_field_placeholder,
       json.string,
@@ -525,7 +518,7 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
           "request_users",
           json.object(
             [#("request_id", json.int(request_id))]
-            |> append_optional("user_is_bot", user_is_bot, json.bool),
+            |> put_optional("user_is_bot", user_is_bot, json.bool),
           ),
         ),
       ])
@@ -566,6 +559,12 @@ pub fn force_reply() -> json.Json {
 // =====================================================================
 //                          internal helpers
 // =====================================================================
+
+fn materialise_rows(reversed_rows: List(List(a))) -> List(List(a)) {
+  reversed_rows
+  |> list.reverse
+  |> list.filter(fn(row) { row != [] })
+}
 
 fn transpose(matrix: List(List(a))) -> List(List(a)) {
   case matrix {
@@ -648,17 +647,5 @@ fn take_n(items: List(a), n: Int) -> #(List(a), List(a)) {
       let #(taken, remainder) = take_n(rest, n - 1)
       #([head, ..taken], remainder)
     }
-  }
-}
-
-fn append_optional(
-  fields: List(#(String, json.Json)),
-  key: String,
-  value: Option(a),
-  encoder: fn(a) -> json.Json,
-) -> List(#(String, json.Json)) {
-  case value {
-    None -> fields
-    Some(v) -> list.append(fields, [#(key, encoder(v))])
   }
 }
