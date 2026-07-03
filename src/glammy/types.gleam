@@ -39,6 +39,7 @@ pub type User {
   )
 }
 
+/// Decode a Telegram `User` value from JSON.
 pub fn user_decoder() -> Decoder(User) {
   use id <- decode.field("id", decode.int)
   use is_bot <- decode.field("is_bot", decode.bool)
@@ -81,6 +82,7 @@ pub type ChatType {
   Channel
 }
 
+/// Decode a Telegram `ChatType` value from JSON.
 pub fn chat_type_decoder() -> Decoder(ChatType) {
   use raw <- decode.then(decode.string)
   case raw {
@@ -104,6 +106,7 @@ pub type Chat {
   )
 }
 
+/// Decode a Telegram `Chat` value from JSON.
 pub fn chat_decoder() -> Decoder(Chat) {
   use id <- decode.field("id", decode.int)
   use type_ <- decode.field("type", chat_type_decoder())
@@ -136,6 +139,7 @@ pub type ChatPhoto {
   )
 }
 
+/// Decode a Telegram `ChatPhoto` value from JSON.
 pub fn chat_photo_decoder() -> Decoder(ChatPhoto) {
   use small_file_id <- decode.field("small_file_id", decode.string)
   use small_file_unique_id <- decode.field(
@@ -175,6 +179,7 @@ pub type ChatPermissions {
   )
 }
 
+/// Decode a Telegram `ChatPermissions` value from JSON.
 pub fn chat_permissions_decoder() -> Decoder(ChatPermissions) {
   use can_send_messages <- opt_bool("can_send_messages")
   use can_send_audios <- opt_bool("can_send_audios")
@@ -222,6 +227,7 @@ pub type PhotoSize {
   )
 }
 
+/// Decode a Telegram `PhotoSize` value from JSON.
 pub fn photo_size_decoder() -> Decoder(PhotoSize) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -248,6 +254,7 @@ pub type Document {
   )
 }
 
+/// Decode a Telegram `Document` value from JSON.
 pub fn document_decoder() -> Decoder(Document) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -279,6 +286,7 @@ pub type Audio {
   )
 }
 
+/// Decode a Telegram `Audio` value from JSON.
 pub fn audio_decoder() -> Decoder(Audio) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -312,6 +320,7 @@ pub type Voice {
   )
 }
 
+/// Decode a Telegram `Voice` value from JSON.
 pub fn voice_decoder() -> Decoder(Voice) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -341,6 +350,7 @@ pub type Video {
   )
 }
 
+/// Decode a Telegram `Video` value from JSON.
 pub fn video_decoder() -> Decoder(Video) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -375,6 +385,7 @@ pub type VideoNote {
   )
 }
 
+/// Decode a Telegram `VideoNote` value from JSON.
 pub fn video_note_decoder() -> Decoder(VideoNote) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -406,6 +417,7 @@ pub type Animation {
   )
 }
 
+/// Decode a Telegram `Animation` value from JSON.
 pub fn animation_decoder() -> Decoder(Animation) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -439,6 +451,7 @@ pub type StickerType {
   CustomEmojiSticker
 }
 
+/// Decode a Telegram `StickerType` value from JSON.
 pub fn sticker_type_decoder() -> Decoder(StickerType) {
   use raw <- decode.then(decode.string)
   case raw {
@@ -453,6 +466,7 @@ pub type MaskPosition {
   MaskPosition(point: String, x_shift: Float, y_shift: Float, scale: Float)
 }
 
+/// Decode a Telegram `MaskPosition` value from JSON.
 pub fn mask_position_decoder() -> Decoder(MaskPosition) {
   use point <- decode.field("point", decode.string)
   use x_shift <- decode.field("x_shift", decode.float)
@@ -481,6 +495,7 @@ pub type Sticker {
   )
 }
 
+/// Decode a Telegram `Sticker` value from JSON.
 pub fn sticker_decoder() -> Decoder(Sticker) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -537,6 +552,7 @@ pub type Location {
   )
 }
 
+/// Decode a Telegram `Location` value from JSON.
 pub fn location_decoder() -> Decoder(Location) {
   use longitude <- decode.field("longitude", decode.float)
   use latitude <- decode.field("latitude", decode.float)
@@ -566,6 +582,7 @@ pub type Venue {
   )
 }
 
+/// Decode a Telegram `Venue` value from JSON.
 pub fn venue_decoder() -> Decoder(Venue) {
   use location <- decode.field("location", location_decoder())
   use title <- decode.field("title", decode.string)
@@ -595,6 +612,7 @@ pub type Contact {
   )
 }
 
+/// Decode a Telegram `Contact` value from JSON.
 pub fn contact_decoder() -> Decoder(Contact) {
   use phone_number <- decode.field("phone_number", decode.string)
   use first_name <- decode.field("first_name", decode.string)
@@ -614,6 +632,7 @@ pub type Dice {
   Dice(emoji: String, value: Int)
 }
 
+/// Decode a Telegram `Dice` value from JSON.
 pub fn dice_decoder() -> Decoder(Dice) {
   use emoji <- decode.field("emoji", decode.string)
   use value <- decode.field("value", decode.int)
@@ -628,6 +647,7 @@ pub type PollOption {
   PollOption(text: String, voter_count: Int)
 }
 
+/// Decode a Telegram `PollOption` value from JSON.
 pub fn poll_option_decoder() -> Decoder(PollOption) {
   use text <- decode.field("text", decode.string)
   use voter_count <- decode.field("voter_count", decode.int)
@@ -651,6 +671,7 @@ pub type Poll {
   )
 }
 
+/// Decode a Telegram `Poll` value from JSON.
 pub fn poll_decoder() -> Decoder(Poll) {
   use id <- decode.field("id", decode.string)
   use question <- decode.field("question", decode.string)
@@ -692,6 +713,7 @@ pub type PollAnswer {
   )
 }
 
+/// Decode a Telegram `PollAnswer` value from JSON.
 pub fn poll_answer_decoder() -> Decoder(PollAnswer) {
   use poll_id <- decode.field("poll_id", decode.string)
   use voter_chat <- opt_nested("voter_chat", chat_decoder())
@@ -716,6 +738,7 @@ pub type MessageEntity {
   )
 }
 
+/// Decode a Telegram `MessageEntity` value from JSON.
 pub fn message_entity_decoder() -> Decoder(MessageEntity) {
   use type_ <- decode.field("type", decode.string)
   use offset <- decode.field("offset", decode.int)
@@ -745,6 +768,7 @@ pub type ReactionType {
   ReactionPaid
 }
 
+/// Decode a Telegram `ReactionType` value from JSON.
 pub fn reaction_type_decoder() -> Decoder(ReactionType) {
   use type_ <- decode.field("type", decode.string)
   case type_ {
@@ -765,6 +789,7 @@ pub type ReactionCount {
   ReactionCount(type_: ReactionType, total_count: Int)
 }
 
+/// Decode a Telegram `ReactionCount` value from JSON.
 pub fn reaction_count_decoder() -> Decoder(ReactionCount) {
   use type_ <- decode.field("type", reaction_type_decoder())
   use total_count <- decode.field("total_count", decode.int)
@@ -783,6 +808,7 @@ pub type MessageReactionUpdated {
   )
 }
 
+/// Decode a Telegram `MessageReactionUpdated` value from JSON.
 pub fn message_reaction_updated_decoder() -> Decoder(MessageReactionUpdated) {
   use chat <- decode.field("chat", chat_decoder())
   use message_id <- decode.field("message_id", decode.int)
@@ -817,6 +843,7 @@ pub type MessageReactionCountUpdated {
   )
 }
 
+/// Decode a Telegram `MessageReactionCountUpdated` value from JSON.
 pub fn message_reaction_count_updated_decoder() -> Decoder(
   MessageReactionCountUpdated,
 ) {
@@ -849,6 +876,7 @@ pub type Invoice {
   )
 }
 
+/// Decode a Telegram `Invoice` value from JSON.
 pub fn invoice_decoder() -> Decoder(Invoice) {
   use title <- decode.field("title", decode.string)
   use description <- decode.field("description", decode.string)
@@ -875,6 +903,7 @@ pub type ShippingAddress {
   )
 }
 
+/// Decode a Telegram `ShippingAddress` value from JSON.
 pub fn shipping_address_decoder() -> Decoder(ShippingAddress) {
   use country_code <- decode.field("country_code", decode.string)
   use state <- decode.field("state", decode.string)
@@ -901,6 +930,7 @@ pub type OrderInfo {
   )
 }
 
+/// Decode a Telegram `OrderInfo` value from JSON.
 pub fn order_info_decoder() -> Decoder(OrderInfo) {
   use name <- opt_str("name")
   use phone_number <- opt_str("phone_number")
@@ -924,6 +954,7 @@ pub type SuccessfulPayment {
   )
 }
 
+/// Decode a Telegram `SuccessfulPayment` value from JSON.
 pub fn successful_payment_decoder() -> Decoder(SuccessfulPayment) {
   use currency <- decode.field("currency", decode.string)
   use total_amount <- decode.field("total_amount", decode.int)
@@ -959,6 +990,7 @@ pub type RefundedPayment {
   )
 }
 
+/// Decode a Telegram `RefundedPayment` value from JSON.
 pub fn refunded_payment_decoder() -> Decoder(RefundedPayment) {
   use currency <- decode.field("currency", decode.string)
   use total_amount <- decode.field("total_amount", decode.int)
@@ -986,6 +1018,7 @@ pub type ShippingQuery {
   )
 }
 
+/// Decode a Telegram `ShippingQuery` value from JSON.
 pub fn shipping_query_decoder() -> Decoder(ShippingQuery) {
   use id <- decode.field("id", decode.string)
   use from <- decode.field("from", user_decoder())
@@ -1009,6 +1042,7 @@ pub type PreCheckoutQuery {
   )
 }
 
+/// Decode a Telegram `PreCheckoutQuery` value from JSON.
 pub fn pre_checkout_query_decoder() -> Decoder(PreCheckoutQuery) {
   use id <- decode.field("id", decode.string)
   use from <- decode.field("from", user_decoder())
@@ -1032,6 +1066,7 @@ pub type PaidMediaPurchased {
   PaidMediaPurchased(from: User, paid_media_payload: String)
 }
 
+/// Decode a Telegram `PaidMediaPurchased` value from JSON.
 pub fn paid_media_purchased_decoder() -> Decoder(PaidMediaPurchased) {
   use from <- decode.field("from", user_decoder())
   use paid_media_payload <- decode.field("paid_media_payload", decode.string)
@@ -1088,6 +1123,7 @@ pub type ChatMember {
   ChatMemberBanned(user: User, until_date: Int)
 }
 
+/// Decode a Telegram `ChatMember` value from JSON.
 pub fn chat_member_decoder() -> Decoder(ChatMember) {
   use status <- decode.field("status", decode.string)
   case status {
@@ -1255,6 +1291,7 @@ pub type ChatInviteLink {
   )
 }
 
+/// Decode a Telegram `ChatInviteLink` value from JSON.
 pub fn chat_invite_link_decoder() -> Decoder(ChatInviteLink) {
   use invite_link <- decode.field("invite_link", decode.string)
   use creator <- decode.field("creator", user_decoder())
@@ -1290,6 +1327,7 @@ pub type ChatMemberUpdated {
   )
 }
 
+/// Decode a Telegram `ChatMemberUpdated` value from JSON.
 pub fn chat_member_updated_decoder() -> Decoder(ChatMemberUpdated) {
   use chat <- decode.field("chat", chat_decoder())
   use from <- decode.field("from", user_decoder())
@@ -1320,6 +1358,7 @@ pub type ChatJoinRequest {
   )
 }
 
+/// Decode a Telegram `ChatJoinRequest` value from JSON.
 pub fn chat_join_request_decoder() -> Decoder(ChatJoinRequest) {
   use chat <- decode.field("chat", chat_decoder())
   use from <- decode.field("from", user_decoder())
@@ -1352,6 +1391,7 @@ pub type ChatBoostSource {
   )
 }
 
+/// Decode a Telegram `ChatBoostSource` value from JSON.
 pub fn chat_boost_source_decoder() -> Decoder(ChatBoostSource) {
   use source <- decode.field("source", decode.string)
   case source {
@@ -1392,6 +1432,7 @@ pub type ChatBoost {
   )
 }
 
+/// Decode a Telegram `ChatBoost` value from JSON.
 pub fn chat_boost_decoder() -> Decoder(ChatBoost) {
   use boost_id <- decode.field("boost_id", decode.string)
   use add_date <- decode.field("add_date", decode.int)
@@ -1404,6 +1445,7 @@ pub type ChatBoostUpdated {
   ChatBoostUpdated(chat: Chat, boost: ChatBoost)
 }
 
+/// Decode a Telegram `ChatBoostUpdated` value from JSON.
 pub fn chat_boost_updated_decoder() -> Decoder(ChatBoostUpdated) {
   use chat <- decode.field("chat", chat_decoder())
   use boost <- decode.field("boost", chat_boost_decoder())
@@ -1419,6 +1461,7 @@ pub type ChatBoostRemoved {
   )
 }
 
+/// Decode a Telegram `ChatBoostRemoved` value from JSON.
 pub fn chat_boost_removed_decoder() -> Decoder(ChatBoostRemoved) {
   use chat <- decode.field("chat", chat_decoder())
   use boost_id <- decode.field("boost_id", decode.string)
@@ -1442,6 +1485,7 @@ pub type BusinessConnection {
   )
 }
 
+/// Decode a Telegram `BusinessConnection` value from JSON.
 pub fn business_connection_decoder() -> Decoder(BusinessConnection) {
   use id <- decode.field("id", decode.string)
   use user <- decode.field("user", user_decoder())
@@ -1467,6 +1511,7 @@ pub type BusinessMessagesDeleted {
   )
 }
 
+/// Decode a Telegram `BusinessMessagesDeleted` value from JSON.
 pub fn business_messages_deleted_decoder() -> Decoder(BusinessMessagesDeleted) {
   use business_connection_id <- decode.field(
     "business_connection_id",
@@ -1494,6 +1539,7 @@ pub type File {
   )
 }
 
+/// Decode a Telegram `File` value from JSON.
 pub fn file_decoder() -> Decoder(File) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
@@ -1512,6 +1558,7 @@ pub type LinkPreviewOptions {
   )
 }
 
+/// Decode a Telegram `LinkPreviewOptions` value from JSON.
 pub fn link_preview_options_decoder() -> Decoder(LinkPreviewOptions) {
   use is_disabled <- opt_bool("is_disabled")
   use url <- opt_str("url")
@@ -1591,6 +1638,7 @@ pub type Message {
   )
 }
 
+/// Decode a Telegram `Message` value from JSON.
 pub fn message_decoder() -> Decoder(Message) {
   use message_id <- decode.field("message_id", decode.int)
   use message_thread_id <- opt_int("message_thread_id")
@@ -1729,6 +1777,7 @@ pub type CallbackQuery {
   )
 }
 
+/// Decode a Telegram `CallbackQuery` value from JSON.
 pub fn callback_query_decoder() -> Decoder(CallbackQuery) {
   use id <- decode.field("id", decode.string)
   use from <- decode.field("from", user_decoder())
@@ -1763,6 +1812,7 @@ pub type InlineQuery {
   )
 }
 
+/// Decode a Telegram `InlineQuery` value from JSON.
 pub fn inline_query_decoder() -> Decoder(InlineQuery) {
   use id <- decode.field("id", decode.string)
   use from <- decode.field("from", user_decoder())
@@ -1783,6 +1833,7 @@ pub type ChosenInlineResult {
   )
 }
 
+/// Decode a Telegram `ChosenInlineResult` value from JSON.
 pub fn chosen_inline_result_decoder() -> Decoder(ChosenInlineResult) {
   use result_id <- decode.field("result_id", decode.string)
   use from <- decode.field("from", user_decoder())
@@ -1836,6 +1887,7 @@ pub type Update {
   Update(update_id: Int, kind: UpdateKind)
 }
 
+/// Decode a Telegram `Update` value from JSON.
 pub fn update_decoder() -> Decoder(Update) {
   use update_id <- decode.field("update_id", decode.int)
   use kind <- decode.then(update_kind_decoder())
@@ -2014,6 +2066,7 @@ pub type ResponseParameters {
   ResponseParameters(migrate_to_chat_id: Option(Int), retry_after: Option(Int))
 }
 
+/// Decode a Telegram `ResponseParameters` value from JSON.
 pub fn response_parameters_decoder() -> Decoder(ResponseParameters) {
   use migrate_to_chat_id <- opt_int("migrate_to_chat_id")
   use retry_after <- opt_int("retry_after")
@@ -2028,6 +2081,7 @@ pub type BotCommand {
   BotCommand(command: String, description: String)
 }
 
+/// Decode a Telegram `BotCommand` value from JSON.
 pub fn bot_command_decoder() -> Decoder(BotCommand) {
   use command <- decode.field("command", decode.string)
   use description <- decode.field("description", decode.string)
@@ -2062,6 +2116,7 @@ pub type WebhookInfo {
   )
 }
 
+/// Decode a Telegram `WebhookInfo` value from JSON.
 pub fn webhook_info_decoder() -> Decoder(WebhookInfo) {
   use url <- decode.field("url", decode.string)
   use has_custom_certificate <- decode.field(

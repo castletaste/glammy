@@ -42,6 +42,7 @@ pub type LoginUrl {
   )
 }
 
+/// Create `LoginUrl` options for an inline login button.
 pub fn login_url(url: String) -> LoginUrl {
   LoginUrl(
     url:,
@@ -61,6 +62,7 @@ pub type SwitchInlineChosenChat {
   )
 }
 
+/// Create default `switch_inline_query_chosen_chat` options.
 pub fn switch_inline_chosen_chat() -> SwitchInlineChosenChat {
   SwitchInlineChosenChat(
     query: None,
@@ -77,6 +79,7 @@ pub opaque type InlineKeyboard {
   InlineKeyboard(reversed_rows: List(List(InlineKeyboardButton)))
 }
 
+/// Create an empty `InlineKeyboard`.
 pub fn inline() -> InlineKeyboard {
   InlineKeyboard(reversed_rows: [[]])
 }
@@ -86,6 +89,7 @@ pub fn inline_from(rows: List(List(InlineKeyboardButton))) -> InlineKeyboard {
   InlineKeyboard(reversed_rows: list.reverse(rows))
 }
 
+/// Append an inline callback button.
 pub fn inline_text(
   keyboard: InlineKeyboard,
   text: String,
@@ -94,6 +98,7 @@ pub fn inline_text(
   add_inline_button(keyboard, InlineCallback(text:, callback_data:))
 }
 
+/// Append an inline URL button.
 pub fn inline_url(
   keyboard: InlineKeyboard,
   text: String,
@@ -102,6 +107,7 @@ pub fn inline_url(
   add_inline_button(keyboard, InlineUrl(text:, url:))
 }
 
+/// Append an inline web-app button.
 pub fn inline_web_app(
   keyboard: InlineKeyboard,
   text: String,
@@ -110,6 +116,7 @@ pub fn inline_web_app(
   add_inline_button(keyboard, InlineWebApp(text:, url:))
 }
 
+/// Append an inline login button.
 pub fn inline_login(
   keyboard: InlineKeyboard,
   text: String,
@@ -118,6 +125,7 @@ pub fn inline_login(
   add_inline_button(keyboard, InlineLoginUrl(text:, login_url: url))
 }
 
+/// Append a button that opens inline mode in another chat.
 pub fn inline_switch_inline(
   keyboard: InlineKeyboard,
   text: String,
@@ -126,6 +134,7 @@ pub fn inline_switch_inline(
   add_inline_button(keyboard, InlineSwitchInline(text:, query:))
 }
 
+/// Append a button that opens inline mode in the current chat.
 pub fn inline_switch_inline_current(
   keyboard: InlineKeyboard,
   text: String,
@@ -134,6 +143,7 @@ pub fn inline_switch_inline_current(
   add_inline_button(keyboard, InlineSwitchInlineCurrent(text:, query:))
 }
 
+/// Append a button with chosen-chat inline-mode options.
 pub fn inline_switch_inline_chosen(
   keyboard: InlineKeyboard,
   text: String,
@@ -142,10 +152,12 @@ pub fn inline_switch_inline_chosen(
   add_inline_button(keyboard, InlineSwitchInlineChosen(text:, options:))
 }
 
+/// Append an inline game button.
 pub fn inline_game(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
   add_inline_button(keyboard, InlineGame(text:))
 }
 
+/// Append an inline pay button.
 pub fn inline_pay(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
   add_inline_button(keyboard, InlinePay(text:))
 }
@@ -181,7 +193,8 @@ pub fn inline_transpose(keyboard: InlineKeyboard) -> InlineKeyboard {
 
 /// Wrap all buttons into rows of at most `cols` columns. If
 /// `fill_last_row` is `True` the first row absorbs the remainder; if
-/// `False` the last row may be shorter.
+/// `False` the last row may be shorter. A non-positive `cols` leaves
+/// all buttons in a single row.
 pub fn inline_flow(
   keyboard: InlineKeyboard,
   cols: Int,
@@ -199,6 +212,7 @@ pub fn inline_append(
   inline_from(list.append(inline_rows(keyboard), inline_rows(other)))
 }
 
+/// Render an `InlineKeyboard` as Telegram markup JSON.
 pub fn inline_to_json(keyboard: InlineKeyboard) -> json.Json {
   json.object([
     #(
@@ -303,6 +317,7 @@ pub opaque type ReplyKeyboard {
   )
 }
 
+/// Create an empty `ReplyKeyboard`.
 pub fn reply() -> ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: [[]],
@@ -314,6 +329,7 @@ pub fn reply() -> ReplyKeyboard {
   )
 }
 
+/// Build a `ReplyKeyboard` from a list of rows of buttons.
 pub fn reply_from(rows: List(List(ReplyKeyboardButton))) -> ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: list.reverse(rows),
@@ -325,10 +341,12 @@ pub fn reply_from(rows: List(List(ReplyKeyboardButton))) -> ReplyKeyboard {
   )
 }
 
+/// Append a plain reply-keyboard text button.
 pub fn reply_text(keyboard: ReplyKeyboard, text: String) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyText(text:))
 }
 
+/// Append a reply button that requests the user's contact.
 pub fn reply_request_contact(
   keyboard: ReplyKeyboard,
   text: String,
@@ -336,6 +354,7 @@ pub fn reply_request_contact(
   add_reply_button(keyboard, ReplyRequestContact(text:))
 }
 
+/// Append a reply button that requests the user's location.
 pub fn reply_request_location(
   keyboard: ReplyKeyboard,
   text: String,
@@ -343,6 +362,7 @@ pub fn reply_request_location(
   add_reply_button(keyboard, ReplyRequestLocation(text:))
 }
 
+/// Append a reply button that requests poll creation.
 pub fn reply_request_poll(
   keyboard: ReplyKeyboard,
   text: String,
@@ -351,6 +371,7 @@ pub fn reply_request_poll(
   add_reply_button(keyboard, ReplyRequestPoll(text:, type_:))
 }
 
+/// Append a reply web-app button.
 pub fn reply_web_app(
   keyboard: ReplyKeyboard,
   text: String,
@@ -359,6 +380,7 @@ pub fn reply_web_app(
   add_reply_button(keyboard, ReplyWebApp(text:, url:))
 }
 
+/// Append a reply button that requests users.
 pub fn reply_request_users(
   keyboard: ReplyKeyboard,
   text: String,
@@ -371,6 +393,7 @@ pub fn reply_request_users(
   )
 }
 
+/// Append a reply button that requests a chat.
 pub fn reply_request_chat(
   keyboard: ReplyKeyboard,
   text: String,
@@ -383,6 +406,7 @@ pub fn reply_request_chat(
   )
 }
 
+/// Append a reply button that requests a managed bot.
 pub fn reply_request_managed_bot(
   keyboard: ReplyKeyboard,
   text: String,
@@ -391,26 +415,32 @@ pub fn reply_request_managed_bot(
   add_reply_button(keyboard, ReplyRequestManagedBot(text:, request_id:))
 }
 
+/// Start a new reply-keyboard row.
 pub fn reply_row(keyboard: ReplyKeyboard) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, reversed_rows: [[], ..keyboard.reversed_rows])
 }
 
+/// Set Telegram's `resize_keyboard` option.
 pub fn reply_resize(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, resize: Some(value))
 }
 
+/// Set Telegram's `one_time_keyboard` option.
 pub fn reply_one_time(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, one_time: Some(value))
 }
 
+/// Set Telegram's `selective` option.
 pub fn reply_selective(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, selective: Some(value))
 }
 
+/// Set Telegram's `is_persistent` option.
 pub fn reply_persistent(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, is_persistent: Some(value))
 }
 
+/// Set the input-field placeholder shown with the reply keyboard.
 pub fn reply_placeholder(
   keyboard: ReplyKeyboard,
   text: String,
@@ -432,15 +462,19 @@ fn add_reply_button(
   }
 }
 
+/// Return the reply keyboard rows in display order. Useful for tests.
 pub fn reply_rows(keyboard: ReplyKeyboard) -> List(List(ReplyKeyboardButton)) {
   materialise_rows(keyboard.reversed_rows)
 }
 
+/// Transpose the reply keyboard rows.
 pub fn reply_transpose(keyboard: ReplyKeyboard) -> ReplyKeyboard {
   let rows = transpose(reply_rows(keyboard))
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Wrap reply-keyboard buttons into rows of at most `cols` columns.
+/// A non-positive `cols` leaves all buttons in a single row.
 pub fn reply_flow(
   keyboard: ReplyKeyboard,
   cols: Int,
@@ -451,6 +485,7 @@ pub fn reply_flow(
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Append another reply keyboard's rows to this one.
 pub fn reply_append(
   keyboard: ReplyKeyboard,
   other: ReplyKeyboard,
@@ -459,6 +494,7 @@ pub fn reply_append(
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Render a `ReplyKeyboard` as Telegram markup JSON.
 pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
   let base = [
     #(
@@ -548,10 +584,12 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
 //                        Markup helpers
 // =====================================================================
 
+/// Build Telegram `ReplyKeyboardRemove` JSON.
 pub fn remove_keyboard() -> json.Json {
   json.object([#("remove_keyboard", json.bool(True))])
 }
 
+/// Build Telegram `ForceReply` JSON.
 pub fn force_reply() -> json.Json {
   json.object([#("force_reply", json.bool(True))])
 }

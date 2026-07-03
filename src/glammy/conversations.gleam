@@ -49,6 +49,7 @@ type Command {
   TryRoute(update: Update, key: String, reply_to: Subject(Bool))
 }
 
+/// Create an empty in-memory conversation registry.
 pub fn new_registry() -> Registry {
   let setup: Subject(Subject(Command)) = process.new_subject()
   let _ =

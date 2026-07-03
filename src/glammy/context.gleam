@@ -24,6 +24,7 @@ pub type Context {
   Context(update: Update, api: Api)
 }
 
+/// Wrap an incoming `Update` and `Api` client into a `Context`.
 pub fn new(update: Update, api: Api) -> Context {
   Context(update:, api:)
 }
@@ -44,6 +45,7 @@ pub fn message(ctx: Context) -> Option(Message) {
   }
 }
 
+/// The chat associated with this update, when Telegram provides one.
 pub fn chat(ctx: Context) -> Option(Chat) {
   case message(ctx) {
     Some(m) -> Some(m.chat)
@@ -62,6 +64,7 @@ pub fn chat(ctx: Context) -> Option(Chat) {
   }
 }
 
+/// The user who triggered this update, when Telegram provides one.
 pub fn from(ctx: Context) -> Option(User) {
   case ctx.update.kind {
     MessageUpdate(m) -> m.from
@@ -85,6 +88,7 @@ pub fn from(ctx: Context) -> Option(User) {
   }
 }
 
+/// Return the callback query carried by this update, if any.
 pub fn callback_query(ctx: Context) -> Option(CallbackQuery) {
   case ctx.update.kind {
     CallbackQueryUpdate(cq) -> Some(cq)
@@ -92,6 +96,7 @@ pub fn callback_query(ctx: Context) -> Option(CallbackQuery) {
   }
 }
 
+/// Return the inline query carried by this update, if any.
 pub fn inline_query(ctx: Context) -> Option(InlineQuery) {
   case ctx.update.kind {
     InlineQueryUpdate(q) -> Some(q)
@@ -99,6 +104,7 @@ pub fn inline_query(ctx: Context) -> Option(InlineQuery) {
   }
 }
 
+/// Return the chosen inline result carried by this update, if any.
 pub fn chosen_inline_result(ctx: Context) -> Option(ChosenInlineResult) {
   case ctx.update.kind {
     ChosenInlineResultUpdate(r) -> Some(r)
@@ -106,6 +112,7 @@ pub fn chosen_inline_result(ctx: Context) -> Option(ChosenInlineResult) {
   }
 }
 
+/// Return the shipping query carried by this update, if any.
 pub fn shipping_query(ctx: Context) -> Option(ShippingQuery) {
   case ctx.update.kind {
     ShippingQueryUpdate(q) -> Some(q)
@@ -113,6 +120,7 @@ pub fn shipping_query(ctx: Context) -> Option(ShippingQuery) {
   }
 }
 
+/// Return the pre-checkout query carried by this update, if any.
 pub fn pre_checkout_query(ctx: Context) -> Option(PreCheckoutQuery) {
   case ctx.update.kind {
     PreCheckoutQueryUpdate(q) -> Some(q)
@@ -120,6 +128,7 @@ pub fn pre_checkout_query(ctx: Context) -> Option(PreCheckoutQuery) {
   }
 }
 
+/// Return the bot's own chat-member update, if present.
 pub fn my_chat_member(ctx: Context) -> Option(ChatMemberUpdated) {
   case ctx.update.kind {
     MyChatMemberUpdate(c) -> Some(c)
@@ -127,6 +136,7 @@ pub fn my_chat_member(ctx: Context) -> Option(ChatMemberUpdated) {
   }
 }
 
+/// Return a chat-member update, if present.
 pub fn chat_member(ctx: Context) -> Option(ChatMemberUpdated) {
   case ctx.update.kind {
     ChatMemberUpdate(c) -> Some(c)
@@ -134,6 +144,7 @@ pub fn chat_member(ctx: Context) -> Option(ChatMemberUpdated) {
   }
 }
 
+/// Return a chat join request, if present.
 pub fn chat_join_request(ctx: Context) -> Option(ChatJoinRequest) {
   case ctx.update.kind {
     ChatJoinRequestUpdate(c) -> Some(c)
@@ -141,6 +152,7 @@ pub fn chat_join_request(ctx: Context) -> Option(ChatJoinRequest) {
   }
 }
 
+/// The text of the current message, when this update carries one.
 pub fn message_text(ctx: Context) -> Option(String) {
   option.then(message(ctx), fn(m) { m.text })
 }
@@ -203,10 +215,12 @@ pub fn sender_chat(ctx: Context) -> Option(Chat) {
   option.then(message(ctx), fn(m) { m.sender_chat })
 }
 
+/// Expose the raw `UpdateKind` for lower-level branching.
 pub fn update_kind(ctx: Context) -> UpdateKind {
   ctx.update.kind
 }
 
+/// Check whether this update is the `OtherUpdate` fallback.
 pub fn is_other_update(ctx: Context) -> Bool {
   case ctx.update.kind {
     OtherUpdate -> True
@@ -214,6 +228,7 @@ pub fn is_other_update(ctx: Context) -> Bool {
   }
 }
 
+/// Return the poll id from `poll` or `poll_answer` updates.
 pub fn poll_answer_or_poll_id(ctx: Context) -> Option(String) {
   case ctx.update.kind {
     PollUpdate(p) -> Some(p.id)
@@ -232,10 +247,12 @@ pub type ReplyError {
   ReplyApiError(GlammyError)
 }
 
+/// Send a plain text reply using default `SendMessageOptions`.
 pub fn reply(ctx: Context, text: String) -> Result(Message, ReplyError) {
   reply_with(ctx, text, api.default_send_message_options())
 }
 
+/// Send a text reply with explicit `SendMessageOptions`.
 pub fn reply_with(
   ctx: Context,
   text: String,

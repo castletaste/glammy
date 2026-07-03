@@ -40,6 +40,7 @@ pub type InputMessageContent {
   )
 }
 
+/// Render `InputMessageContent` as Telegram JSON.
 pub fn input_message_content_to_json(
   content: InputMessageContent,
 ) -> json.Json {
@@ -120,6 +121,7 @@ pub fn input_message_content_to_json(
 //                            Result builders
 // =====================================================================
 
+/// Build an `InlineQueryResultArticle` JSON object.
 pub fn article(
   id: String,
   title: String,
@@ -146,6 +148,7 @@ pub fn article(
   )
 }
 
+/// Build an `InlineQueryResultPhoto` JSON object.
 pub fn photo(
   id: String,
   photo_url: String,
@@ -167,6 +170,7 @@ pub fn photo(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultVideo` JSON object.
 pub fn video(
   id: String,
   video_url: String,
@@ -190,6 +194,7 @@ pub fn video(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultAudio` JSON object.
 pub fn audio(
   id: String,
   audio_url: String,
@@ -211,6 +216,7 @@ pub fn audio(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultVoice` JSON object.
 pub fn voice(
   id: String,
   voice_url: String,
@@ -230,6 +236,7 @@ pub fn voice(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultDocument` JSON object.
 pub fn document(
   id: String,
   title: String,
@@ -251,6 +258,7 @@ pub fn document(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultLocation` JSON object.
 pub fn location(
   id: String,
   latitude: Float,
@@ -271,6 +279,7 @@ pub fn location(
   |> finish_result(None, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultVenue` JSON object.
 pub fn venue(
   id: String,
   latitude: Float,
@@ -291,6 +300,7 @@ pub fn venue(
   |> finish_result(None, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultContact` JSON object.
 pub fn contact(
   id: String,
   phone_number: String,
@@ -311,6 +321,7 @@ pub fn contact(
   |> finish_result(None, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultSticker` JSON object.
 pub fn sticker(
   id: String,
   sticker_file_id: String,
@@ -325,6 +336,7 @@ pub fn sticker(
   |> finish_result(None, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultCachedPhoto` JSON object.
 pub fn cached_photo(
   id: String,
   photo_file_id: String,
@@ -339,6 +351,7 @@ pub fn cached_photo(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultGame` JSON object.
 pub fn game(
   id: String,
   game_short_name: String,
@@ -352,6 +365,7 @@ pub fn game(
   |> finish_result(None, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultGif` JSON object.
 pub fn gif(
   id: String,
   gif_url: String,
@@ -371,6 +385,7 @@ pub fn gif(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultMpeg4Gif` JSON object.
 pub fn mpeg4_gif(
   id: String,
   mpeg4_url: String,
@@ -390,6 +405,7 @@ pub fn mpeg4_gif(
   |> finish_result(caption, reply_markup, input_message_content)
 }
 
+/// Build an `InlineQueryResultCachedAudio` JSON object.
 pub fn cached_audio(
   id: String,
   audio_file_id: String,
@@ -404,6 +420,7 @@ pub fn cached_audio(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedDocument` JSON object.
 pub fn cached_document(
   id: String,
   title: String,
@@ -420,6 +437,7 @@ pub fn cached_document(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedVideo` JSON object.
 pub fn cached_video(
   id: String,
   title: String,
@@ -436,6 +454,7 @@ pub fn cached_video(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedVoice` JSON object.
 pub fn cached_voice(
   id: String,
   title: String,
@@ -452,6 +471,7 @@ pub fn cached_voice(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedGif` JSON object.
 pub fn cached_gif(
   id: String,
   gif_file_id: String,
@@ -466,6 +486,7 @@ pub fn cached_gif(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedMpeg4Gif` JSON object.
 pub fn cached_mpeg4_gif(
   id: String,
   mpeg4_file_id: String,
@@ -480,6 +501,7 @@ pub fn cached_mpeg4_gif(
   |> finish_result(caption, reply_markup, None)
 }
 
+/// Build an `InlineQueryResultCachedSticker` JSON object.
 pub fn cached_sticker(
   id: String,
   sticker_file_id: String,

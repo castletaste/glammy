@@ -23,6 +23,7 @@ pub opaque type Composer {
   Composer(stack: List(Middleware))
 }
 
+/// Create an empty composer.
 pub fn new() -> Composer {
   Composer(stack: [])
 }

@@ -39,7 +39,7 @@ pub fn main() -> Nil {
 
 | Module                  | Role                                                              |
 | ----------------------- | ----------------------------------------------------------------- |
-| `glammy/api`            | HTTP + JSON Bot API client. ~50 typed methods + generic `call`.   |
+| `glammy/api`            | HTTP + JSON Bot API client. 70+ typed methods + generic `call`.   |
 | `glammy/types`          | Telegram types (Update, Message, Chat, all media, payments, …).   |
 | `glammy/composer`       | Middleware pipeline — `command`, `hears`, `on`, `use_middleware`. |
 | `glammy/context`        | `Context` wrapper passed to every handler.                        |

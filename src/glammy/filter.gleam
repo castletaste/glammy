@@ -59,6 +59,7 @@ pub type Filter {
   PurchasedPaidMedia
 }
 
+/// Check whether a typed `Filter` matches the context.
 pub fn matches(filter: Filter, ctx: Context) -> Bool {
   case filter {
     AnyUpdate -> True
@@ -421,6 +422,7 @@ fn is_valid_user_key(name: String) -> Bool {
 //                            Matching
 // =====================================================================
 
+/// Check whether a parsed grammY-style filter query matches the context.
 pub fn matches_query(query: Query, ctx: Context) -> Bool {
   list.any(query.alternatives, fn(triple) { matches_triple(triple, ctx) })
 }
