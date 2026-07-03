@@ -156,19 +156,15 @@ pub fn photo(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("photo")),
-      #("id", json.string(id)),
-      #("photo_url", json.string(photo_url)),
-      #("thumbnail_url", json.string(thumbnail_url)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional("title", title, json.string)
-    |> put_optional("description", description, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("photo")),
+    #("id", json.string(id)),
+    #("photo_url", json.string(photo_url)),
+    #("thumbnail_url", json.string(thumbnail_url)),
+  ]
+  |> put_optional("title", title, json.string)
+  |> put_optional("description", description, json.string)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn video(
@@ -182,20 +178,16 @@ pub fn video(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("video")),
-      #("id", json.string(id)),
-      #("video_url", json.string(video_url)),
-      #("mime_type", json.string(mime_type)),
-      #("thumbnail_url", json.string(thumbnail_url)),
-      #("title", json.string(title)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional("description", description, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("video")),
+    #("id", json.string(id)),
+    #("video_url", json.string(video_url)),
+    #("mime_type", json.string(mime_type)),
+    #("thumbnail_url", json.string(thumbnail_url)),
+    #("title", json.string(title)),
+  ]
+  |> put_optional("description", description, json.string)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn audio(
@@ -208,19 +200,15 @@ pub fn audio(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("audio")),
-      #("id", json.string(id)),
-      #("audio_url", json.string(audio_url)),
-      #("title", json.string(title)),
-    ]
-    |> put_optional("performer", performer, json.string)
-    |> put_optional("audio_duration", audio_duration, json.int)
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("audio")),
+    #("id", json.string(id)),
+    #("audio_url", json.string(audio_url)),
+    #("title", json.string(title)),
+  ]
+  |> put_optional("performer", performer, json.string)
+  |> put_optional("audio_duration", audio_duration, json.int)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn voice(
@@ -232,18 +220,14 @@ pub fn voice(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("voice")),
-      #("id", json.string(id)),
-      #("voice_url", json.string(voice_url)),
-      #("title", json.string(title)),
-    ]
-    |> put_optional("voice_duration", voice_duration, json.int)
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("voice")),
+    #("id", json.string(id)),
+    #("voice_url", json.string(voice_url)),
+    #("title", json.string(title)),
+  ]
+  |> put_optional("voice_duration", voice_duration, json.int)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn document(
@@ -256,19 +240,15 @@ pub fn document(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("document")),
-      #("id", json.string(id)),
-      #("title", json.string(title)),
-      #("document_url", json.string(document_url)),
-      #("mime_type", json.string(mime_type)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional("description", description, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("document")),
+    #("id", json.string(id)),
+    #("title", json.string(title)),
+    #("document_url", json.string(document_url)),
+    #("mime_type", json.string(mime_type)),
+  ]
+  |> put_optional("description", description, json.string)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn location(
@@ -280,18 +260,15 @@ pub fn location(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("location")),
-      #("id", json.string(id)),
-      #("latitude", json.float(latitude)),
-      #("longitude", json.float(longitude)),
-      #("title", json.string(title)),
-    ]
-    |> put_optional("horizontal_accuracy", horizontal_accuracy, json.float)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("location")),
+    #("id", json.string(id)),
+    #("latitude", json.float(latitude)),
+    #("longitude", json.float(longitude)),
+    #("title", json.string(title)),
+  ]
+  |> put_optional("horizontal_accuracy", horizontal_accuracy, json.float)
+  |> finish_result(None, reply_markup, input_message_content)
 }
 
 pub fn venue(
@@ -303,18 +280,15 @@ pub fn venue(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("venue")),
-      #("id", json.string(id)),
-      #("latitude", json.float(latitude)),
-      #("longitude", json.float(longitude)),
-      #("title", json.string(title)),
-      #("address", json.string(address)),
-    ]
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("venue")),
+    #("id", json.string(id)),
+    #("latitude", json.float(latitude)),
+    #("longitude", json.float(longitude)),
+    #("title", json.string(title)),
+    #("address", json.string(address)),
+  ]
+  |> finish_result(None, reply_markup, input_message_content)
 }
 
 pub fn contact(
@@ -326,18 +300,15 @@ pub fn contact(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("contact")),
-      #("id", json.string(id)),
-      #("phone_number", json.string(phone_number)),
-      #("first_name", json.string(first_name)),
-    ]
-    |> put_optional("last_name", last_name, json.string)
-    |> put_optional("vcard", vcard, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("contact")),
+    #("id", json.string(id)),
+    #("phone_number", json.string(phone_number)),
+    #("first_name", json.string(first_name)),
+  ]
+  |> put_optional("last_name", last_name, json.string)
+  |> put_optional("vcard", vcard, json.string)
+  |> finish_result(None, reply_markup, input_message_content)
 }
 
 pub fn sticker(
@@ -346,15 +317,12 @@ pub fn sticker(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("sticker")),
-      #("id", json.string(id)),
-      #("sticker_file_id", json.string(sticker_file_id)),
-    ]
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("sticker")),
+    #("id", json.string(id)),
+    #("sticker_file_id", json.string(sticker_file_id)),
+  ]
+  |> finish_result(None, reply_markup, input_message_content)
 }
 
 pub fn cached_photo(
@@ -363,15 +331,12 @@ pub fn cached_photo(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("photo")),
-      #("id", json.string(id)),
-      #("photo_file_id", json.string(photo_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("photo")),
+    #("id", json.string(id)),
+    #("photo_file_id", json.string(photo_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn game(
@@ -379,14 +344,12 @@ pub fn game(
   game_short_name: String,
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("game")),
-      #("id", json.string(id)),
-      #("game_short_name", json.string(game_short_name)),
-    ]
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("game")),
+    #("id", json.string(id)),
+    #("game_short_name", json.string(game_short_name)),
+  ]
+  |> finish_result(None, reply_markup, None)
 }
 
 pub fn gif(
@@ -398,18 +361,14 @@ pub fn gif(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("gif")),
-      #("id", json.string(id)),
-      #("gif_url", json.string(gif_url)),
-      #("thumbnail_url", json.string(thumbnail_url)),
-    ]
-    |> put_optional("title", title, json.string)
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("gif")),
+    #("id", json.string(id)),
+    #("gif_url", json.string(gif_url)),
+    #("thumbnail_url", json.string(thumbnail_url)),
+  ]
+  |> put_optional("title", title, json.string)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn mpeg4_gif(
@@ -421,18 +380,14 @@ pub fn mpeg4_gif(
   reply_markup: Option(json.Json),
   input_message_content: Option(InputMessageContent),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("mpeg4_gif")),
-      #("id", json.string(id)),
-      #("mpeg4_url", json.string(mpeg4_url)),
-      #("thumbnail_url", json.string(thumbnail_url)),
-    ]
-    |> put_optional("title", title, json.string)
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup)
-    |> opt_input_content(input_message_content),
-  )
+  [
+    #("type", json.string("mpeg4_gif")),
+    #("id", json.string(id)),
+    #("mpeg4_url", json.string(mpeg4_url)),
+    #("thumbnail_url", json.string(thumbnail_url)),
+  ]
+  |> put_optional("title", title, json.string)
+  |> finish_result(caption, reply_markup, input_message_content)
 }
 
 pub fn cached_audio(
@@ -441,15 +396,12 @@ pub fn cached_audio(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("audio")),
-      #("id", json.string(id)),
-      #("audio_file_id", json.string(audio_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("audio")),
+    #("id", json.string(id)),
+    #("audio_file_id", json.string(audio_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_document(
@@ -459,16 +411,13 @@ pub fn cached_document(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("document")),
-      #("id", json.string(id)),
-      #("title", json.string(title)),
-      #("document_file_id", json.string(document_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("document")),
+    #("id", json.string(id)),
+    #("title", json.string(title)),
+    #("document_file_id", json.string(document_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_video(
@@ -478,16 +427,13 @@ pub fn cached_video(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("video")),
-      #("id", json.string(id)),
-      #("title", json.string(title)),
-      #("video_file_id", json.string(video_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("video")),
+    #("id", json.string(id)),
+    #("title", json.string(title)),
+    #("video_file_id", json.string(video_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_voice(
@@ -497,16 +443,13 @@ pub fn cached_voice(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("voice")),
-      #("id", json.string(id)),
-      #("title", json.string(title)),
-      #("voice_file_id", json.string(voice_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("voice")),
+    #("id", json.string(id)),
+    #("title", json.string(title)),
+    #("voice_file_id", json.string(voice_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_gif(
@@ -515,15 +458,12 @@ pub fn cached_gif(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("gif")),
-      #("id", json.string(id)),
-      #("gif_file_id", json.string(gif_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("gif")),
+    #("id", json.string(id)),
+    #("gif_file_id", json.string(gif_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_mpeg4_gif(
@@ -532,15 +472,12 @@ pub fn cached_mpeg4_gif(
   caption: Option(String),
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("mpeg4_gif")),
-      #("id", json.string(id)),
-      #("mpeg4_file_id", json.string(mpeg4_file_id)),
-    ]
-    |> put_optional("caption", caption, json.string)
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("mpeg4_gif")),
+    #("id", json.string(id)),
+    #("mpeg4_file_id", json.string(mpeg4_file_id)),
+  ]
+  |> finish_result(caption, reply_markup, None)
 }
 
 pub fn cached_sticker(
@@ -548,19 +485,30 @@ pub fn cached_sticker(
   sticker_file_id: String,
   reply_markup: Option(json.Json),
 ) -> json.Json {
-  json.object(
-    [
-      #("type", json.string("sticker")),
-      #("id", json.string(id)),
-      #("sticker_file_id", json.string(sticker_file_id)),
-    ]
-    |> put_optional_json("reply_markup", reply_markup),
-  )
+  [
+    #("type", json.string("sticker")),
+    #("id", json.string(id)),
+    #("sticker_file_id", json.string(sticker_file_id)),
+  ]
+  |> finish_result(None, reply_markup, None)
 }
 
 // =====================================================================
 //                          Helpers
 // =====================================================================
+
+fn finish_result(
+  fields: List(#(String, json.Json)),
+  caption: Option(String),
+  reply_markup: Option(json.Json),
+  input: Option(InputMessageContent),
+) -> json.Json {
+  fields
+  |> put_optional("caption", caption, json.string)
+  |> put_optional_json("reply_markup", reply_markup)
+  |> opt_input_content(input)
+  |> json.object
+}
 
 fn opt_input_content(
   fields: List(#(String, json.Json)),
