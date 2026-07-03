@@ -145,10 +145,7 @@ pub type WaitError {
 }
 
 fn key_for(ctx: Context) -> Option(String) {
-  case context.from(ctx) {
-    Some(u) -> Some(int.to_string(u.id))
-    None -> None
-  }
+  context.from(ctx) |> option.map(fn(u) { int.to_string(u.id) })
 }
 
 fn update_to_ctx(update: Update, original: Context) -> Context {

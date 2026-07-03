@@ -98,19 +98,12 @@ fn run_storage_loop(
 ) -> Nil {
   case process.receive_forever(subject) {
     Get(key:, reply_to:) -> {
-      process.send(reply_to, dict_get_option(state, key))
+      process.send(reply_to, option.from_result(dict.get(state, key)))
       run_storage_loop(subject, state)
     }
     Set(key:, value:) ->
       run_storage_loop(subject, dict.insert(state, key, value))
     Delete(key:) -> run_storage_loop(subject, dict.delete(state, key))
-  }
-}
-
-fn dict_get_option(d: Dict(k, v), key: k) -> Option(v) {
-  case dict.get(d, key) {
-    Ok(v) -> Some(v)
-    Error(_) -> None
   }
 }
 
@@ -168,18 +161,8 @@ pub fn with_session(
   handler: fn(Context, value) -> value,
 ) -> Composer {
   composer.use_middleware(composer, fn(ctx, next) {
-    case key_fn(ctx) {
-      None -> next()
-      Some(key) -> {
-        let initial = case storage.get(key) {
-          Some(v) -> v
-          None -> default
-        }
-        let final = handler(ctx, initial)
-        storage.set(key, final)
-        next()
-      }
-    }
+    run(storage, ctx, key_fn, default, handler)
+    next()
   })
 }
 

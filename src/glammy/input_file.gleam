@@ -16,6 +16,7 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 
 pub type InputFile {
@@ -100,7 +101,7 @@ fn filename_from_path(path: String) -> String {
   path
   |> string.split("/")
   |> list.last
-  |> result_or("")
+  |> result.unwrap("")
 }
 
 fn filename_from_url(url: String) -> String {
@@ -122,12 +123,5 @@ fn filename_from_url(url: String) -> String {
         Error(_) -> host
       }
     _ -> without_scheme
-  }
-}
-
-fn result_or(r: Result(a, b), default: a) -> a {
-  case r {
-    Ok(v) -> v
-    Error(_) -> default
   }
 }

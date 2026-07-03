@@ -142,10 +142,7 @@ pub fn chat_join_request(ctx: Context) -> Option(ChatJoinRequest) {
 }
 
 pub fn message_text(ctx: Context) -> Option(String) {
-  case message(ctx) {
-    Some(m) -> m.text
-    None -> None
-  }
+  option.then(message(ctx), fn(m) { m.text })
 }
 
 /// The `message_id` of whichever update carries one — message,
@@ -164,10 +161,7 @@ pub fn message_id(ctx: Context) -> Option(Int) {
 
 /// The chat id of whichever update carries a chat.
 pub fn chat_id(ctx: Context) -> Option(Int) {
-  case chat(ctx) {
-    Some(c) -> Some(c.id)
-    None -> None
-  }
+  option.map(chat(ctx), fn(c) { c.id })
 }
 
 /// The `inline_message_id` carried by callback queries on inline-mode
@@ -206,10 +200,7 @@ pub fn has_callback_data(ctx: Context, data: String) -> Bool {
 /// `chat` — useful for channel posts forwarded as anonymous group
 /// admin messages.
 pub fn sender_chat(ctx: Context) -> Option(Chat) {
-  case message(ctx) {
-    Some(m) -> m.sender_chat
-    None -> None
-  }
+  option.then(message(ctx), fn(m) { m.sender_chat })
 }
 
 pub fn update_kind(ctx: Context) -> UpdateKind {
