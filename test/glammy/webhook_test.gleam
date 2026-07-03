@@ -4,10 +4,10 @@
 //// envelope, concurrent dispatch) — none of those apply here; glammy
 //// is framework-agnostic and synchronous.
 
-import glammy/api
 import glammy/bot
 import glammy/composer
 import glammy/context
+import glammy/helpers.{dummy_api}
 import glammy/webhook
 import gleam/erlang/process
 
@@ -16,11 +16,11 @@ const message_update_body = "{\"update_id\":1,\"message\":{\"message_id\":1,\"ch
 const update_with_unknown_fields = "{\"update_id\":2,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"},\"future_field\":{\"unknown\":42}}"
 
 fn make_bot() -> bot.Bot {
-  bot.new(api.new("0:test"), composer.new())
+  bot.new(dummy_api(), composer.new())
 }
 
 fn make_bot_with(comp: composer.Composer) -> bot.Bot {
-  bot.new(api.new("0:test"), comp)
+  bot.new(dummy_api(), comp)
 }
 
 // =====================================================================

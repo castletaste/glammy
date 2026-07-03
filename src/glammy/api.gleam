@@ -17,7 +17,7 @@ import glammy/error.{
   type GlammyError, ApiError, DecodeError as ApiDecodeError, HttpError,
 }
 import glammy/input_file.{type InputFile}
-import glammy/internal/json_utils.{put_optional}
+import glammy/internal/json_utils.{put_optional, put_optional_json}
 import glammy/multipart.{type Part, FilePart, TextPart}
 import glammy/types.{
   type BotCommand, type CallbackQuery, type ChatInviteLink, type ChatMember,
@@ -275,44 +275,40 @@ fn describe_json_error(err: json.DecodeError) -> String {
 //                          Common option helpers
 // =====================================================================
 
-fn opt_text_part(
-  parts: List(Part),
+fn opt_extra(
+  extras: List(#(String, String)),
   key: String,
   value: Option(String),
-) -> List(Part) {
+) -> List(#(String, String)) {
   case value {
-    None -> parts
-    Some(v) -> list.append(parts, [TextPart(name: key, value: v)])
+    None -> extras
+    Some(v) -> list.append(extras, [#(key, v)])
   }
 }
 
-fn opt_int_part(
-  parts: List(Part),
+fn opt_int_extra(
+  extras: List(#(String, String)),
   key: String,
   value: Option(Int),
-) -> List(Part) {
-  case value {
-    None -> parts
-    Some(v) ->
-      list.append(parts, [TextPart(name: key, value: int.to_string(v))])
-  }
+) -> List(#(String, String)) {
+  opt_extra(extras, key, option.map(value, int.to_string))
 }
 
-fn opt_bool_part(
-  parts: List(Part),
+fn opt_bool_extra(
+  extras: List(#(String, String)),
   key: String,
   value: Option(Bool),
-) -> List(Part) {
-  case value {
-    None -> parts
-    Some(v) ->
-      list.append(parts, [
-        TextPart(name: key, value: case v {
-          True -> "true"
-          False -> "false"
-        }),
-      ])
-  }
+) -> List(#(String, String)) {
+  opt_extra(
+    extras,
+    key,
+    option.map(value, fn(v) {
+      case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+  )
 }
 
 fn file_to_parts(
@@ -488,7 +484,7 @@ pub fn send_message(
       options.disable_web_page_preview,
       json.bool,
     )
-    |> put_optional("reply_markup", options.reply_markup, fn(j) { j })
+    |> put_optional_json("reply_markup", options.reply_markup)
     |> put_optional(
       "business_connection_id",
       options.business_connection_id,
@@ -603,7 +599,7 @@ pub fn edit_message_text(
       #("text", json.string(text)),
     ]
     |> put_optional("parse_mode", parse_mode, json.string)
-    |> put_optional("reply_markup", reply_markup, fn(j) { j })
+    |> put_optional_json("reply_markup", reply_markup)
   call(api, "editMessageText", fields, message_decoder())
 }
 
@@ -622,7 +618,7 @@ pub fn edit_message_caption(
       #("caption", json.string(caption)),
     ]
     |> put_optional("parse_mode", parse_mode, json.string)
-    |> put_optional("reply_markup", reply_markup, fn(j) { j })
+    |> put_optional_json("reply_markup", reply_markup)
   call(api, "editMessageCaption", fields, message_decoder())
 }
 
@@ -637,7 +633,7 @@ pub fn edit_message_reply_markup(
       #("chat_id", chat_id_to_json(chat_id)),
       #("message_id", json.int(message_id)),
     ]
-    |> put_optional("reply_markup", reply_markup, fn(j) { j })
+    |> put_optional_json("reply_markup", reply_markup)
   call(api, "editMessageReplyMarkup", fields, message_decoder())
 }
 
@@ -716,32 +712,36 @@ fn send_media_via_multipart(
   options: SendMediaOptions,
   extra_text_parts: List(#(String, String)),
 ) -> Result(Message, GlammyError) {
+  let option_extras =
+    []
+    |> opt_extra("caption", options.caption)
+    |> opt_extra("parse_mode", options.parse_mode)
+    |> opt_bool_extra(
+      "show_caption_above_media",
+      options.show_caption_above_media,
+    )
+    |> opt_bool_extra("has_spoiler", options.has_spoiler)
+    |> opt_bool_extra("disable_notification", options.disable_notification)
+    |> opt_bool_extra("protect_content", options.protect_content)
+    |> opt_int_extra("reply_to_message_id", options.reply_to_message_id)
+    |> opt_int_extra("message_thread_id", options.message_thread_id)
+    |> opt_extra(
+      "reply_markup",
+      option.map(options.reply_markup, json.to_string),
+    )
+    |> opt_extra("business_connection_id", options.business_connection_id)
   let base_parts = [
     TextPart(name: "chat_id", value: chat_id_to_string(chat_id)),
   ]
   let with_file = file_to_parts(base_parts, file_field, file_field, file)
-  let with_extra =
-    list.fold(extra_text_parts, with_file, fn(parts, pair) {
-      list.append(parts, [TextPart(name: pair.0, value: pair.1)])
-    })
   let with_options =
-    with_extra
-    |> opt_text_part("caption", options.caption)
-    |> opt_text_part("parse_mode", options.parse_mode)
-    |> opt_bool_part(
-      "show_caption_above_media",
-      options.show_caption_above_media,
+    list.fold(
+      list.append(extra_text_parts, option_extras),
+      with_file,
+      fn(parts, pair) {
+        list.append(parts, [TextPart(name: pair.0, value: pair.1)])
+      },
     )
-    |> opt_bool_part("has_spoiler", options.has_spoiler)
-    |> opt_bool_part("disable_notification", options.disable_notification)
-    |> opt_bool_part("protect_content", options.protect_content)
-    |> opt_int_part("reply_to_message_id", options.reply_to_message_id)
-    |> opt_int_part("message_thread_id", options.message_thread_id)
-    |> opt_text_part(
-      "reply_markup",
-      option.map(options.reply_markup, json.to_string),
-    )
-    |> opt_text_part("business_connection_id", options.business_connection_id)
   call_multipart(api, method, with_options, message_decoder())
 }
 
@@ -789,17 +789,10 @@ pub fn send_video(
   options: SendMediaOptions,
 ) -> Result(Message, GlammyError) {
   let extras =
-    [
-      #("duration", duration),
-      #("width", width),
-      #("height", height),
-    ]
-    |> list.filter_map(fn(p) {
-      case p.1 {
-        Some(v) -> Ok(#(p.0, int.to_string(v)))
-        None -> Error(Nil)
-      }
-    })
+    []
+    |> opt_int_extra("duration", duration)
+    |> opt_int_extra("width", width)
+    |> opt_int_extra("height", height)
   send_media_via_multipart(
     api,
     "sendVideo",
@@ -822,9 +815,9 @@ pub fn send_audio(
 ) -> Result(Message, GlammyError) {
   let extras =
     []
-    |> add_str_extra("performer", performer)
-    |> add_str_extra("title", title)
-    |> add_int_extra("duration", duration)
+    |> opt_extra("performer", performer)
+    |> opt_extra("title", title)
+    |> opt_int_extra("duration", duration)
   send_media_via_multipart(
     api,
     "sendAudio",
@@ -843,7 +836,7 @@ pub fn send_voice(
   duration: Option(Int),
   options: SendMediaOptions,
 ) -> Result(Message, GlammyError) {
-  let extras = add_int_extra([], "duration", duration)
+  let extras = opt_int_extra([], "duration", duration)
   send_media_via_multipart(
     api,
     "sendVoice",
@@ -866,9 +859,9 @@ pub fn send_animation(
 ) -> Result(Message, GlammyError) {
   let extras =
     []
-    |> add_int_extra("duration", duration)
-    |> add_int_extra("width", width)
-    |> add_int_extra("height", height)
+    |> opt_int_extra("duration", duration)
+    |> opt_int_extra("width", width)
+    |> opt_int_extra("height", height)
   send_media_via_multipart(
     api,
     "sendAnimation",
@@ -890,8 +883,8 @@ pub fn send_video_note(
 ) -> Result(Message, GlammyError) {
   let extras =
     []
-    |> add_int_extra("duration", duration)
-    |> add_int_extra("length", length)
+    |> opt_int_extra("duration", duration)
+    |> opt_int_extra("length", length)
   send_media_via_multipart(
     api,
     "sendVideoNote",
@@ -918,28 +911,6 @@ pub fn send_sticker(
     options,
     [],
   )
-}
-
-fn add_int_extra(
-  extras: List(#(String, String)),
-  key: String,
-  value: Option(Int),
-) -> List(#(String, String)) {
-  case value {
-    Some(v) -> list.append(extras, [#(key, int.to_string(v))])
-    None -> extras
-  }
-}
-
-fn add_str_extra(
-  extras: List(#(String, String)),
-  key: String,
-  value: Option(String),
-) -> List(#(String, String)) {
-  case value {
-    Some(v) -> list.append(extras, [#(key, v)])
-    None -> extras
-  }
 }
 
 // =====================================================================
@@ -1146,7 +1117,7 @@ pub fn answer_shipping_query(
       #("shipping_query_id", json.string(shipping_query_id)),
       #("ok", json.bool(ok)),
     ]
-    |> put_optional("shipping_options", shipping_options, fn(j) { j })
+    |> put_optional_json("shipping_options", shipping_options)
     |> put_optional("error_message", error_message, json.string)
   call(api, "answerShippingQuery", fields, decode.bool)
 }
@@ -1404,14 +1375,15 @@ pub fn revoke_chat_invite_link(
   )
 }
 
-pub fn approve_chat_join_request(
+fn chat_join_request_action(
   api: Api,
+  method: String,
   chat_id: ChatId,
   user_id: Int,
 ) -> Result(Bool, GlammyError) {
   call(
     api,
-    "approveChatJoinRequest",
+    method,
     [
       #("chat_id", chat_id_to_json(chat_id)),
       #("user_id", json.int(user_id)),
@@ -1420,20 +1392,20 @@ pub fn approve_chat_join_request(
   )
 }
 
+pub fn approve_chat_join_request(
+  api: Api,
+  chat_id: ChatId,
+  user_id: Int,
+) -> Result(Bool, GlammyError) {
+  chat_join_request_action(api, "approveChatJoinRequest", chat_id, user_id)
+}
+
 pub fn decline_chat_join_request(
   api: Api,
   chat_id: ChatId,
   user_id: Int,
 ) -> Result(Bool, GlammyError) {
-  call(
-    api,
-    "declineChatJoinRequest",
-    [
-      #("chat_id", chat_id_to_json(chat_id)),
-      #("user_id", json.int(user_id)),
-    ],
-    decode.bool,
-  )
+  chat_join_request_action(api, "declineChatJoinRequest", chat_id, user_id)
 }
 
 pub fn set_chat_title(
@@ -1559,6 +1531,29 @@ pub fn get_file(api: Api, file_id: String) -> Result(File, GlammyError) {
 //                       MyCommands / My* settings
 // =====================================================================
 
+fn scope_language_fields(
+  scope: Option(json.Json),
+  language_code: Option(String),
+) -> List(#(String, json.Json)) {
+  []
+  |> put_optional_json("scope", scope)
+  |> put_optional("language_code", language_code, json.string)
+}
+
+fn set_my_string(
+  api: Api,
+  method: String,
+  key: String,
+  value: Option(String),
+  language_code: Option(String),
+) -> Result(Bool, GlammyError) {
+  let fields =
+    []
+    |> put_optional(key, value, json.string)
+    |> put_optional("language_code", language_code, json.string)
+  call(api, method, fields, decode.bool)
+}
+
 pub fn set_my_commands(
   api: Api,
   commands: List(#(String, String)),
@@ -1577,8 +1572,7 @@ pub fn set_my_commands(
         }),
       ),
     ]
-    |> put_optional("scope", scope, fn(j) { j })
-    |> put_optional("language_code", language_code, json.string)
+    |> list.append(scope_language_fields(scope, language_code), _)
   call(api, "setMyCommands", fields, decode.bool)
 }
 
@@ -1587,11 +1581,12 @@ pub fn get_my_commands(
   scope: Option(json.Json),
   language_code: Option(String),
 ) -> Result(List(BotCommand), GlammyError) {
-  let fields =
-    []
-    |> put_optional("scope", scope, fn(j) { j })
-    |> put_optional("language_code", language_code, json.string)
-  call(api, "getMyCommands", fields, decode.list(bot_command_decoder()))
+  call(
+    api,
+    "getMyCommands",
+    scope_language_fields(scope, language_code),
+    decode.list(bot_command_decoder()),
+  )
 }
 
 pub fn delete_my_commands(
@@ -1599,11 +1594,12 @@ pub fn delete_my_commands(
   scope: Option(json.Json),
   language_code: Option(String),
 ) -> Result(Bool, GlammyError) {
-  let fields =
-    []
-    |> put_optional("scope", scope, fn(j) { j })
-    |> put_optional("language_code", language_code, json.string)
-  call(api, "deleteMyCommands", fields, decode.bool)
+  call(
+    api,
+    "deleteMyCommands",
+    scope_language_fields(scope, language_code),
+    decode.bool,
+  )
 }
 
 pub fn set_my_name(
@@ -1611,11 +1607,7 @@ pub fn set_my_name(
   name: Option(String),
   language_code: Option(String),
 ) -> Result(Bool, GlammyError) {
-  let fields =
-    []
-    |> put_optional("name", name, json.string)
-    |> put_optional("language_code", language_code, json.string)
-  call(api, "setMyName", fields, decode.bool)
+  set_my_string(api, "setMyName", "name", name, language_code)
 }
 
 pub fn set_my_description(
@@ -1623,11 +1615,13 @@ pub fn set_my_description(
   description: Option(String),
   language_code: Option(String),
 ) -> Result(Bool, GlammyError) {
-  let fields =
-    []
-    |> put_optional("description", description, json.string)
-    |> put_optional("language_code", language_code, json.string)
-  call(api, "setMyDescription", fields, decode.bool)
+  set_my_string(
+    api,
+    "setMyDescription",
+    "description",
+    description,
+    language_code,
+  )
 }
 
 pub fn set_my_short_description(
@@ -1635,11 +1629,13 @@ pub fn set_my_short_description(
   short_description: Option(String),
   language_code: Option(String),
 ) -> Result(Bool, GlammyError) {
-  let fields =
-    []
-    |> put_optional("short_description", short_description, json.string)
-    |> put_optional("language_code", language_code, json.string)
-  call(api, "setMyShortDescription", fields, decode.bool)
+  set_my_string(
+    api,
+    "setMyShortDescription",
+    "short_description",
+    short_description,
+    language_code,
+  )
 }
 
 // =====================================================================
@@ -1703,20 +1699,29 @@ pub fn edit_forum_topic(
   call(api, "editForumTopic", fields, decode.bool)
 }
 
-pub fn close_forum_topic(
+fn forum_topic_action(
   api: Api,
+  method: String,
   chat_id: ChatId,
   message_thread_id: Int,
 ) -> Result(Bool, GlammyError) {
   call(
     api,
-    "closeForumTopic",
+    method,
     [
       #("chat_id", chat_id_to_json(chat_id)),
       #("message_thread_id", json.int(message_thread_id)),
     ],
     decode.bool,
   )
+}
+
+pub fn close_forum_topic(
+  api: Api,
+  chat_id: ChatId,
+  message_thread_id: Int,
+) -> Result(Bool, GlammyError) {
+  forum_topic_action(api, "closeForumTopic", chat_id, message_thread_id)
 }
 
 pub fn reopen_forum_topic(
@@ -1724,15 +1729,7 @@ pub fn reopen_forum_topic(
   chat_id: ChatId,
   message_thread_id: Int,
 ) -> Result(Bool, GlammyError) {
-  call(
-    api,
-    "reopenForumTopic",
-    [
-      #("chat_id", chat_id_to_json(chat_id)),
-      #("message_thread_id", json.int(message_thread_id)),
-    ],
-    decode.bool,
-  )
+  forum_topic_action(api, "reopenForumTopic", chat_id, message_thread_id)
 }
 
 pub fn delete_forum_topic(
@@ -1740,15 +1737,7 @@ pub fn delete_forum_topic(
   chat_id: ChatId,
   message_thread_id: Int,
 ) -> Result(Bool, GlammyError) {
-  call(
-    api,
-    "deleteForumTopic",
-    [
-      #("chat_id", chat_id_to_json(chat_id)),
-      #("message_thread_id", json.int(message_thread_id)),
-    ],
-    decode.bool,
-  )
+  forum_topic_action(api, "deleteForumTopic", chat_id, message_thread_id)
 }
 
 pub fn unpin_all_forum_topic_messages(
@@ -1756,14 +1745,11 @@ pub fn unpin_all_forum_topic_messages(
   chat_id: ChatId,
   message_thread_id: Int,
 ) -> Result(Bool, GlammyError) {
-  call(
+  forum_topic_action(
     api,
     "unpinAllForumTopicMessages",
-    [
-      #("chat_id", chat_id_to_json(chat_id)),
-      #("message_thread_id", json.int(message_thread_id)),
-    ],
-    decode.bool,
+    chat_id,
+    message_thread_id,
   )
 }
 
@@ -1889,7 +1875,7 @@ pub fn send_invoice(
       invoice.reply_to_message_id,
       json.int,
     )
-    |> put_optional("reply_markup", invoice.reply_markup, fn(j) { j })
+    |> put_optional_json("reply_markup", invoice.reply_markup)
   call(api, "sendInvoice", fields, message_decoder())
 }
 
@@ -1956,16 +1942,15 @@ pub fn set_game_score(
 //                       Webhook helper (parsing)
 // =====================================================================
 
+fn parse_with(body: String, decoder: Decoder(t)) -> Result(t, String) {
+  json.parse(body, decoder)
+  |> result.map_error(describe_json_error)
+}
+
 pub fn parse_update(body: String) -> Result(Update, String) {
-  case json.parse(body, update_decoder()) {
-    Ok(u) -> Ok(u)
-    Error(e) -> Error(describe_json_error(e))
-  }
+  parse_with(body, update_decoder())
 }
 
 pub fn parse_callback_query(body: String) -> Result(CallbackQuery, String) {
-  case json.parse(body, callback_query_decoder()) {
-    Ok(cq) -> Ok(cq)
-    Error(e) -> Error(describe_json_error(e))
-  }
+  parse_with(body, callback_query_decoder())
 }

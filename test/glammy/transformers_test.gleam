@@ -1,11 +1,12 @@
 import glammy/api
 import glammy/error
+import glammy/helpers.{dummy_api}
 import gleam/erlang/process
 
 pub fn transformer_sees_method_name_test() {
   let recorder: process.Subject(String) = process.new_subject()
   let api_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_transformer(fn(_next, method, _payload) {
       process.send(recorder, method)
       Error(error.DecodeError(method:, message: "intercepted"))
@@ -21,7 +22,7 @@ pub fn transformer_short_circuits_test() {
   // would hang or time-out.
   let recorder: process.Subject(String) = process.new_subject()
   let api_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_base_url("https://this-host-does-not-exist.invalid")
     |> api.with_transformer(fn(_next, method, _payload) {
       process.send(recorder, "short-circuited:" <> method)
@@ -43,7 +44,7 @@ pub fn transformer_chain_runs_in_order_test() {
     }
   }
   let api_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_base_url("https://this-host-does-not-exist.invalid")
     |> api.with_transformer(make_recording("a"))
     |> api.with_transformer(make_recording("b"))

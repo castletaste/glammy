@@ -6,31 +6,16 @@
 //// invariants — read/write/persist across calls, key independence,
 //// custom storage backends — are all covered here.
 
-import glammy/api
 import glammy/composer
 import glammy/context
+import glammy/helpers.{dummy_api, message_update as make_message}
 import glammy/session
-import glammy/types.{type Update}
+import glammy/types
 import gleam/dict.{type Dict}
 import gleam/erlang/process
 import gleam/int
 import gleam/json
 import gleam/option.{type Option, None, Some}
-
-fn dummy_api() -> api.Api {
-  api.new("0:test")
-}
-
-fn make_message(text: String, chat_id: Int) -> Update {
-  let body =
-    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":"
-    <> int.to_string(chat_id)
-    <> ",\"type\":\"private\"},\"date\":0,\"text\":\""
-    <> text
-    <> "\"}}"
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  u
-}
 
 // =====================================================================
 //                      Storage interface tests

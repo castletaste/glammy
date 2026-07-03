@@ -79,3 +79,25 @@ pub fn opt_with_default(
 ) -> Decoder(u) {
   decode.optional_field(key, default, decoder, next)
 }
+
+/// Decoder helper for `optional_field(key, None, decode.optional(decoder))`
+/// — the common shape for an optional nested object. Use with `<-`:
+/// `use thumbnail <- opt_nested("thumbnail", photo_size_decoder())`.
+pub fn opt_nested(
+  key: String,
+  decoder: Decoder(a),
+  next: fn(Option(a)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(key, None, decode.optional(decoder), next)
+}
+
+/// Decoder helper for `optional_field(key, [], decode.list(decoder))` — the
+/// common shape for an optional list field. Use with `<-`:
+/// `use entities <- opt_list("entities", message_entity_decoder())`.
+pub fn opt_list(
+  key: String,
+  decoder: Decoder(a),
+  next: fn(List(a)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(key, [], decode.list(decoder), next)
+}

@@ -190,32 +190,7 @@ fn parse_depth2(
       Error(
         "Invalid L2 filter '' in '" <> original <> "': no L3 to default against",
       )
-    _, _ -> {
-      let l1_candidates = expand_l1(l1) |> list.filter(is_valid_l1)
-      let l2_candidates = expand_l2_without_l3(l2)
-      let expanded =
-        list.flat_map(l1_candidates, fn(l1n) {
-          list.map(l2_candidates, fn(l2n) {
-            CompiledTriple(l1: l1n, l2: Some(l2n), l3: None)
-          })
-        })
-      let valid =
-        list.filter(expanded, fn(t) {
-          case t.l2 {
-            Some(name) -> is_valid_l2(t.l1, name)
-            None -> True
-          }
-        })
-      case valid {
-        [] ->
-          Error(
-            "Shortcuts in '"
-            <> original
-            <> "' do not expand to any valid filter query",
-          )
-        _ -> Ok(valid)
-      }
-    }
+    _, _ -> cross_validate(original, l1, expand_l2_without_l3(l2), None)
   }
 }
 
@@ -230,37 +205,46 @@ fn parse_depth3(
       Error(
         "Invalid L3 filter '' in '" <> original <> "': empty leaf not allowed",
       )
-    _ -> {
-      let l1_candidates = expand_l1(l1) |> list.filter(is_valid_l1)
-      let l2_candidates = expand_l2_with_l3(l2)
-      let expanded =
-        list.flat_map(l1_candidates, fn(l1n) {
-          list.map(l2_candidates, fn(l2n) {
-            CompiledTriple(l1: l1n, l2: Some(l2n), l3: Some(l3))
-          })
-        })
-      let valid =
-        list.filter(expanded, fn(t) {
-          let l2_ok = case t.l2 {
-            Some(name) -> is_valid_l2(t.l1, name)
-            None -> True
-          }
-          let l3_ok = case t.l2, t.l3 {
-            Some(l2n), Some(l3n) -> is_valid_l3(l2n, l3n)
-            _, _ -> True
-          }
-          l2_ok && l3_ok
-        })
-      case valid {
-        [] ->
-          Error(
-            "Shortcuts in '"
-            <> original
-            <> "' do not expand to any valid filter query",
-          )
-        _ -> Ok(valid)
+    _ -> cross_validate(original, l1, expand_l2_with_l3(l2), Some(l3))
+  }
+}
+
+/// Shared scaffold for depth-2 and depth-3 parsing: expands L1 shortcuts,
+/// cross-products with the already-expanded L2 candidates, attaches the
+/// given L3 (if any), and filters down to structurally valid triples.
+fn cross_validate(
+  original: String,
+  l1: String,
+  l2_candidates: List(String),
+  l3: option.Option(String),
+) -> Result(List(CompiledTriple), String) {
+  let l1_candidates = expand_l1(l1) |> list.filter(is_valid_l1)
+  let expanded =
+    list.flat_map(l1_candidates, fn(l1n) {
+      list.map(l2_candidates, fn(l2n) {
+        CompiledTriple(l1: l1n, l2: Some(l2n), l3: l3)
+      })
+    })
+  let valid =
+    list.filter(expanded, fn(t) {
+      let l2_ok = case t.l2 {
+        Some(name) -> is_valid_l2(t.l1, name)
+        None -> True
       }
-    }
+      let l3_ok = case t.l2, t.l3 {
+        Some(l2n), Some(l3n) -> is_valid_l3(l2n, l3n)
+        _, _ -> True
+      }
+      l2_ok && l3_ok
+    })
+  case valid {
+    [] ->
+      Error(
+        "Shortcuts in '"
+        <> original
+        <> "' do not expand to any valid filter query",
+      )
+    _ -> Ok(valid)
   }
 }
 
@@ -273,9 +257,8 @@ fn expand_l1(l1: String) -> List(String) {
   }
 }
 
-fn expand_l2_with_l3(l2: String) -> List(String) {
+fn expand_l2_aliases(l2: String) -> List(String) {
   case l2 {
-    "" -> ["entities", "caption_entities"]
     "media" -> ["photo", "video"]
     "file" -> [
       "photo",
@@ -291,23 +274,19 @@ fn expand_l2_with_l3(l2: String) -> List(String) {
   }
 }
 
+fn expand_l2_with_l3(l2: String) -> List(String) {
+  case l2 {
+    "" -> ["entities", "caption_entities"]
+    _ -> expand_l2_aliases(l2)
+  }
+}
+
 fn expand_l2_without_l3(l2: String) -> List(String) {
   case l2 {
     // When there's no L3, the default L2 expansion does NOT apply (an
     // empty L2 with no L3 is ambiguous and grammY rejects it).
     "" -> []
-    "media" -> ["photo", "video"]
-    "file" -> [
-      "photo",
-      "animation",
-      "audio",
-      "document",
-      "video",
-      "video_note",
-      "voice",
-      "sticker",
-    ]
-    name -> [name]
+    _ -> expand_l2_aliases(l2)
   }
 }
 
@@ -460,6 +439,7 @@ fn matches_triple(triple: CompiledTriple, ctx: Context) -> Bool {
 type L1Value {
   MessageValue(Message)
   CallbackValue(CallbackQuery)
+  PresenceOnly
 }
 
 fn extract_l1(name: String, kind: UpdateKind) -> option.Option(L1Value) {
@@ -472,33 +452,24 @@ fn extract_l1(name: String, kind: UpdateKind) -> option.Option(L1Value) {
     "edited_business_message", EditedBusinessMessageUpdate(m) ->
       Some(MessageValue(m))
     "callback_query", CallbackQueryUpdate(cq) -> Some(CallbackValue(cq))
-    "inline_query", InlineQueryUpdate(_) -> Some(MessageValue(empty_message()))
-    "chosen_inline_result", ChosenInlineResultUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "shipping_query", ShippingQueryUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "pre_checkout_query", PreCheckoutQueryUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "poll", PollUpdate(_) -> Some(MessageValue(empty_message()))
-    "poll_answer", PollAnswerUpdate(_) -> Some(MessageValue(empty_message()))
-    "my_chat_member", MyChatMemberUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "chat_member", ChatMemberUpdate(_) -> Some(MessageValue(empty_message()))
-    "chat_join_request", ChatJoinRequestUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "chat_boost", ChatBoostUpdate(_) -> Some(MessageValue(empty_message()))
-    "removed_chat_boost", RemovedChatBoostUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "purchased_paid_media", PurchasedPaidMediaUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "business_connection", BusinessConnectionUpdate(_) ->
-      Some(MessageValue(empty_message()))
+    "inline_query", InlineQueryUpdate(_) -> Some(PresenceOnly)
+    "chosen_inline_result", ChosenInlineResultUpdate(_) -> Some(PresenceOnly)
+    "shipping_query", ShippingQueryUpdate(_) -> Some(PresenceOnly)
+    "pre_checkout_query", PreCheckoutQueryUpdate(_) -> Some(PresenceOnly)
+    "poll", PollUpdate(_) -> Some(PresenceOnly)
+    "poll_answer", PollAnswerUpdate(_) -> Some(PresenceOnly)
+    "my_chat_member", MyChatMemberUpdate(_) -> Some(PresenceOnly)
+    "chat_member", ChatMemberUpdate(_) -> Some(PresenceOnly)
+    "chat_join_request", ChatJoinRequestUpdate(_) -> Some(PresenceOnly)
+    "chat_boost", ChatBoostUpdate(_) -> Some(PresenceOnly)
+    "removed_chat_boost", RemovedChatBoostUpdate(_) -> Some(PresenceOnly)
+    "purchased_paid_media", PurchasedPaidMediaUpdate(_) -> Some(PresenceOnly)
+    "business_connection", BusinessConnectionUpdate(_) -> Some(PresenceOnly)
     "deleted_business_messages", DeletedBusinessMessagesUpdate(_) ->
-      Some(MessageValue(empty_message()))
-    "message_reaction", MessageReactionUpdate(_) ->
-      Some(MessageValue(empty_message()))
+      Some(PresenceOnly)
+    "message_reaction", MessageReactionUpdate(_) -> Some(PresenceOnly)
     "message_reaction_count", MessageReactionCountUpdate(_) ->
-      Some(MessageValue(empty_message()))
+      Some(PresenceOnly)
     _, _ -> None
   }
 }
@@ -515,6 +486,11 @@ fn match_inside_l1(
         Some(l3_name) -> match_l3_in_message(m, l2, l3_name)
       }
     CallbackValue(cq) -> match_inside_callback(l2, cq)
+    // Update kinds carrying no inspectable payload (inline_query,
+    // poll, chat_member, …) never match an L2 field check. This is
+    // pre-existing glammy behavior: e.g. "chat_member:from" always
+    // returns False here, unlike grammY which can inspect `from`.
+    PresenceOnly -> False
   }
 }
 
@@ -595,72 +571,6 @@ fn user_property_holds(u: User, prop: String) -> Bool {
     "me" -> True
     _ -> False
   }
-}
-
-/// A "no fields populated" Message used as a stand-in for non-message L1
-/// values where the matcher only needs to confirm L1 presence.
-fn empty_message() -> Message {
-  types.Message(
-    message_id: 0,
-    message_thread_id: None,
-    from: None,
-    sender_chat: None,
-    date: 0,
-    edit_date: None,
-    chat: types.Chat(
-      id: 0,
-      type_: types.Private,
-      title: None,
-      username: None,
-      first_name: None,
-      last_name: None,
-      is_forum: None,
-    ),
-    forward_origin: None,
-    is_topic_message: None,
-    is_automatic_forward: None,
-    reply_to_message: None,
-    via_bot: None,
-    has_protected_content: None,
-    media_group_id: None,
-    author_signature: None,
-    text: None,
-    entities: [],
-    link_preview_options: None,
-    caption: None,
-    caption_entities: [],
-    show_caption_above_media: None,
-    has_media_spoiler: None,
-    photo: [],
-    document: None,
-    audio: None,
-    voice: None,
-    video: None,
-    video_note: None,
-    animation: None,
-    sticker: None,
-    location: None,
-    venue: None,
-    contact: None,
-    dice: None,
-    poll: None,
-    new_chat_members: [],
-    left_chat_member: None,
-    new_chat_title: None,
-    new_chat_photo: [],
-    delete_chat_photo: None,
-    group_chat_created: None,
-    supergroup_chat_created: None,
-    channel_chat_created: None,
-    migrate_to_chat_id: None,
-    migrate_from_chat_id: None,
-    pinned_message: None,
-    invoice: None,
-    successful_payment: None,
-    refunded_payment: None,
-    connected_website: None,
-    business_connection_id: None,
-  )
 }
 
 /// Check whether an update is the `OtherUpdate` fallback (a variant

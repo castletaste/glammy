@@ -16,7 +16,7 @@ glammy (entry)
       │   ├─ glammy/multipart           — multipart/form-data encoder
       │   ├─ glammy/input_file          — File source descriptors
       │   ├─ glammy/error               — Error variants + `describe`
-      │   └─ glammy/internal/json_utils — shared put_optional / opt_str
+      │   └─ glammy/internal/json_utils — shared put_optional / opt_str / opt_nested / opt_list
       ├─ glammy/webhook                 — framework-agnostic dispatch
       ├─ glammy/session                 — per-key state with pluggable storage
       ├─ glammy/conversations           — single-process linear flows
@@ -193,7 +193,9 @@ then captures.
 - **`glammy/escape.gleam`** — HTML / Markdown / MarkdownV2 escapers.
 - **`glammy/internal/json_utils.gleam`** — INTERNAL. Shared
   `put_optional` / `opt_str` / `opt_int` / `opt_bool` / `opt_float` /
-  `opt_with_default` for the JSON build/decode boilerplate.
+  `opt_with_default` / `opt_nested` / `opt_list` for the JSON
+  build/decode boilerplate. `opt_nested` covers an optional nested
+  object field, `opt_list` an optional list field defaulting to `[]`.
 - **`glammy_ffi.erl`** — FFI: `try_run/1` for `error_boundary`.
 
 ## Conventions

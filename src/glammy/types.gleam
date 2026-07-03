@@ -8,7 +8,9 @@
 //// fields are ignored, and missing-but-required fields produce a clean
 //// decode error.
 
-import glammy/internal/json_utils.{opt_bool, opt_float, opt_int, opt_str}
+import glammy/internal/json_utils.{
+  opt_bool, opt_float, opt_int, opt_list, opt_nested, opt_str,
+}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
 import gleam/list
@@ -249,11 +251,7 @@ pub type Document {
 pub fn document_decoder() -> Decoder(Document) {
   use file_id <- decode.field("file_id", decode.string)
   use file_unique_id <- decode.field("file_unique_id", decode.string)
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   use file_name <- opt_str("file_name")
   use mime_type <- opt_str("mime_type")
   use file_size <- opt_int("file_size")
@@ -290,11 +288,7 @@ pub fn audio_decoder() -> Decoder(Audio) {
   use file_name <- opt_str("file_name")
   use mime_type <- opt_str("mime_type")
   use file_size <- opt_int("file_size")
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   decode.success(Audio(
     file_id:,
     file_unique_id:,
@@ -353,11 +347,7 @@ pub fn video_decoder() -> Decoder(Video) {
   use width <- decode.field("width", decode.int)
   use height <- decode.field("height", decode.int)
   use duration <- decode.field("duration", decode.int)
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   use file_name <- opt_str("file_name")
   use mime_type <- opt_str("mime_type")
   use file_size <- opt_int("file_size")
@@ -390,11 +380,7 @@ pub fn video_note_decoder() -> Decoder(VideoNote) {
   use file_unique_id <- decode.field("file_unique_id", decode.string)
   use length <- decode.field("length", decode.int)
   use duration <- decode.field("duration", decode.int)
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   use file_size <- opt_int("file_size")
   decode.success(VideoNote(
     file_id:,
@@ -426,11 +412,7 @@ pub fn animation_decoder() -> Decoder(Animation) {
   use width <- decode.field("width", decode.int)
   use height <- decode.field("height", decode.int)
   use duration <- decode.field("duration", decode.int)
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   use file_name <- opt_str("file_name")
   use mime_type <- opt_str("mime_type")
   use file_size <- opt_int("file_size")
@@ -507,29 +489,17 @@ pub fn sticker_decoder() -> Decoder(Sticker) {
   use height <- decode.field("height", decode.int)
   use is_animated <- decode.field("is_animated", decode.bool)
   use is_video <- decode.field("is_video", decode.bool)
-  use thumbnail <- decode.optional_field(
-    "thumbnail",
-    None,
-    decode.optional(photo_size_decoder()),
-  )
+  use thumbnail <- opt_nested("thumbnail", photo_size_decoder())
   use emoji <- opt_str("emoji")
   use set_name <- opt_str("set_name")
-  use premium_animation_raw <- decode.optional_field(
-    "premium_animation",
-    None,
-    decode.optional(decode.dynamic),
-  )
+  use premium_animation_raw <- opt_nested("premium_animation", decode.dynamic)
   // premium_animation is actually a File object — but we only care about its
   // file_id here for forwarding purposes.
   let premium_animation = case premium_animation_raw {
     Some(_) -> Some("present")
     None -> None
   }
-  use mask_position <- decode.optional_field(
-    "mask_position",
-    None,
-    decode.optional(mask_position_decoder()),
-  )
+  use mask_position <- opt_nested("mask_position", mask_position_decoder())
   use custom_emoji_id <- opt_str("custom_emoji_id")
   use needs_repainting <- opt_bool("needs_repainting")
   use file_size <- opt_int("file_size")
@@ -724,16 +694,8 @@ pub type PollAnswer {
 
 pub fn poll_answer_decoder() -> Decoder(PollAnswer) {
   use poll_id <- decode.field("poll_id", decode.string)
-  use voter_chat <- decode.optional_field(
-    "voter_chat",
-    None,
-    decode.optional(chat_decoder()),
-  )
-  use user <- decode.optional_field(
-    "user",
-    None,
-    decode.optional(user_decoder()),
-  )
+  use voter_chat <- opt_nested("voter_chat", chat_decoder())
+  use user <- opt_nested("user", user_decoder())
   use option_ids <- decode.field("option_ids", decode.list(decode.int))
   decode.success(PollAnswer(poll_id:, voter_chat:, user:, option_ids:))
 }
@@ -759,11 +721,7 @@ pub fn message_entity_decoder() -> Decoder(MessageEntity) {
   use offset <- decode.field("offset", decode.int)
   use length <- decode.field("length", decode.int)
   use url <- opt_str("url")
-  use user <- decode.optional_field(
-    "user",
-    None,
-    decode.optional(user_decoder()),
-  )
+  use user <- opt_nested("user", user_decoder())
   use language <- opt_str("language")
   use custom_emoji_id <- opt_str("custom_emoji_id")
   decode.success(MessageEntity(
@@ -828,16 +786,8 @@ pub type MessageReactionUpdated {
 pub fn message_reaction_updated_decoder() -> Decoder(MessageReactionUpdated) {
   use chat <- decode.field("chat", chat_decoder())
   use message_id <- decode.field("message_id", decode.int)
-  use user <- decode.optional_field(
-    "user",
-    None,
-    decode.optional(user_decoder()),
-  )
-  use actor_chat <- decode.optional_field(
-    "actor_chat",
-    None,
-    decode.optional(chat_decoder()),
-  )
+  use user <- opt_nested("user", user_decoder())
+  use actor_chat <- opt_nested("actor_chat", chat_decoder())
   use date <- decode.field("date", decode.int)
   use old_reaction <- decode.field(
     "old_reaction",
@@ -955,10 +905,9 @@ pub fn order_info_decoder() -> Decoder(OrderInfo) {
   use name <- opt_str("name")
   use phone_number <- opt_str("phone_number")
   use email <- opt_str("email")
-  use shipping_address <- decode.optional_field(
+  use shipping_address <- opt_nested(
     "shipping_address",
-    None,
-    decode.optional(shipping_address_decoder()),
+    shipping_address_decoder(),
   )
   decode.success(OrderInfo(name:, phone_number:, email:, shipping_address:))
 }
@@ -980,11 +929,7 @@ pub fn successful_payment_decoder() -> Decoder(SuccessfulPayment) {
   use total_amount <- decode.field("total_amount", decode.int)
   use invoice_payload <- decode.field("invoice_payload", decode.string)
   use shipping_option_id <- opt_str("shipping_option_id")
-  use order_info <- decode.optional_field(
-    "order_info",
-    None,
-    decode.optional(order_info_decoder()),
-  )
+  use order_info <- opt_nested("order_info", order_info_decoder())
   use telegram_payment_charge_id <- decode.field(
     "telegram_payment_charge_id",
     decode.string,
@@ -1071,11 +1016,7 @@ pub fn pre_checkout_query_decoder() -> Decoder(PreCheckoutQuery) {
   use total_amount <- decode.field("total_amount", decode.int)
   use invoice_payload <- decode.field("invoice_payload", decode.string)
   use shipping_option_id <- opt_str("shipping_option_id")
-  use order_info <- decode.optional_field(
-    "order_info",
-    None,
-    decode.optional(order_info_decoder()),
-  )
+  use order_info <- opt_nested("order_info", order_info_decoder())
   decode.success(PreCheckoutQuery(
     id:,
     from:,
@@ -1355,11 +1296,7 @@ pub fn chat_member_updated_decoder() -> Decoder(ChatMemberUpdated) {
   use date <- decode.field("date", decode.int)
   use old_chat_member <- decode.field("old_chat_member", chat_member_decoder())
   use new_chat_member <- decode.field("new_chat_member", chat_member_decoder())
-  use invite_link <- decode.optional_field(
-    "invite_link",
-    None,
-    decode.optional(chat_invite_link_decoder()),
-  )
+  use invite_link <- opt_nested("invite_link", chat_invite_link_decoder())
   use via_chat_folder_invite_link <- opt_bool("via_chat_folder_invite_link")
   decode.success(ChatMemberUpdated(
     chat:,
@@ -1389,11 +1326,7 @@ pub fn chat_join_request_decoder() -> Decoder(ChatJoinRequest) {
   use user_chat_id <- decode.field("user_chat_id", decode.int)
   use date <- decode.field("date", decode.int)
   use bio <- opt_str("bio")
-  use invite_link <- decode.optional_field(
-    "invite_link",
-    None,
-    decode.optional(chat_invite_link_decoder()),
-  )
+  use invite_link <- opt_nested("invite_link", chat_invite_link_decoder())
   decode.success(ChatJoinRequest(
     chat:,
     from:,
@@ -1432,11 +1365,7 @@ pub fn chat_boost_source_decoder() -> Decoder(ChatBoostSource) {
     }
     "giveaway" -> {
       use giveaway_message_id <- decode.field("giveaway_message_id", decode.int)
-      use user <- decode.optional_field(
-        "user",
-        None,
-        decode.optional(user_decoder()),
-      )
+      use user <- opt_nested("user", user_decoder())
       use prize_star_count <- opt_int("prize_star_count")
       use is_unclaimed <- opt_bool("is_unclaimed")
       decode.success(ChatBoostSourceGiveaway(
@@ -1665,164 +1594,67 @@ pub type Message {
 pub fn message_decoder() -> Decoder(Message) {
   use message_id <- decode.field("message_id", decode.int)
   use message_thread_id <- opt_int("message_thread_id")
-  use from <- decode.optional_field(
-    "from",
-    None,
-    decode.optional(user_decoder()),
-  )
-  use sender_chat <- decode.optional_field(
-    "sender_chat",
-    None,
-    decode.optional(chat_decoder()),
-  )
+  use from <- opt_nested("from", user_decoder())
+  use sender_chat <- opt_nested("sender_chat", chat_decoder())
   use date <- decode.field("date", decode.int)
   use edit_date <- opt_int("edit_date")
   use chat <- decode.field("chat", chat_decoder())
-  use forward_origin <- decode.optional_field(
-    "forward_origin",
-    None,
-    decode.optional(decode.dynamic),
-  )
+  use forward_origin <- opt_nested("forward_origin", decode.dynamic)
   use is_topic_message <- opt_bool("is_topic_message")
   use is_automatic_forward <- opt_bool("is_automatic_forward")
-  use reply_to_message <- decode.optional_field(
+  use reply_to_message <- opt_nested(
     "reply_to_message",
-    None,
-    decode.optional(decode.recursive(message_decoder)),
+    decode.recursive(message_decoder),
   )
-  use via_bot <- decode.optional_field(
-    "via_bot",
-    None,
-    decode.optional(user_decoder()),
-  )
+  use via_bot <- opt_nested("via_bot", user_decoder())
   use has_protected_content <- opt_bool("has_protected_content")
   use media_group_id <- opt_str("media_group_id")
   use author_signature <- opt_str("author_signature")
   use text <- opt_str("text")
-  use entities <- decode.optional_field(
-    "entities",
-    [],
-    decode.list(message_entity_decoder()),
-  )
-  use link_preview_options <- decode.optional_field(
+  use entities <- opt_list("entities", message_entity_decoder())
+  use link_preview_options <- opt_nested(
     "link_preview_options",
-    None,
-    decode.optional(link_preview_options_decoder()),
+    link_preview_options_decoder(),
   )
   use caption <- opt_str("caption")
-  use caption_entities <- decode.optional_field(
-    "caption_entities",
-    [],
-    decode.list(message_entity_decoder()),
-  )
+  use caption_entities <- opt_list("caption_entities", message_entity_decoder())
   use show_caption_above_media <- opt_bool("show_caption_above_media")
   use has_media_spoiler <- opt_bool("has_media_spoiler")
-  use photo <- decode.optional_field(
-    "photo",
-    [],
-    decode.list(photo_size_decoder()),
-  )
-  use document <- decode.optional_field(
-    "document",
-    None,
-    decode.optional(document_decoder()),
-  )
-  use audio <- decode.optional_field(
-    "audio",
-    None,
-    decode.optional(audio_decoder()),
-  )
-  use voice <- decode.optional_field(
-    "voice",
-    None,
-    decode.optional(voice_decoder()),
-  )
-  use video <- decode.optional_field(
-    "video",
-    None,
-    decode.optional(video_decoder()),
-  )
-  use video_note <- decode.optional_field(
-    "video_note",
-    None,
-    decode.optional(video_note_decoder()),
-  )
-  use animation <- decode.optional_field(
-    "animation",
-    None,
-    decode.optional(animation_decoder()),
-  )
-  use sticker <- decode.optional_field(
-    "sticker",
-    None,
-    decode.optional(sticker_decoder()),
-  )
-  use location <- decode.optional_field(
-    "location",
-    None,
-    decode.optional(location_decoder()),
-  )
-  use venue <- decode.optional_field(
-    "venue",
-    None,
-    decode.optional(venue_decoder()),
-  )
-  use contact <- decode.optional_field(
-    "contact",
-    None,
-    decode.optional(contact_decoder()),
-  )
-  use dice <- decode.optional_field(
-    "dice",
-    None,
-    decode.optional(dice_decoder()),
-  )
-  use poll <- decode.optional_field(
-    "poll",
-    None,
-    decode.optional(poll_decoder()),
-  )
-  use new_chat_members <- decode.optional_field(
-    "new_chat_members",
-    [],
-    decode.list(user_decoder()),
-  )
-  use left_chat_member <- decode.optional_field(
-    "left_chat_member",
-    None,
-    decode.optional(user_decoder()),
-  )
+  use photo <- opt_list("photo", photo_size_decoder())
+  use document <- opt_nested("document", document_decoder())
+  use audio <- opt_nested("audio", audio_decoder())
+  use voice <- opt_nested("voice", voice_decoder())
+  use video <- opt_nested("video", video_decoder())
+  use video_note <- opt_nested("video_note", video_note_decoder())
+  use animation <- opt_nested("animation", animation_decoder())
+  use sticker <- opt_nested("sticker", sticker_decoder())
+  use location <- opt_nested("location", location_decoder())
+  use venue <- opt_nested("venue", venue_decoder())
+  use contact <- opt_nested("contact", contact_decoder())
+  use dice <- opt_nested("dice", dice_decoder())
+  use poll <- opt_nested("poll", poll_decoder())
+  use new_chat_members <- opt_list("new_chat_members", user_decoder())
+  use left_chat_member <- opt_nested("left_chat_member", user_decoder())
   use new_chat_title <- opt_str("new_chat_title")
-  use new_chat_photo <- decode.optional_field(
-    "new_chat_photo",
-    [],
-    decode.list(photo_size_decoder()),
-  )
+  use new_chat_photo <- opt_list("new_chat_photo", photo_size_decoder())
   use delete_chat_photo <- opt_bool("delete_chat_photo")
   use group_chat_created <- opt_bool("group_chat_created")
   use supergroup_chat_created <- opt_bool("supergroup_chat_created")
   use channel_chat_created <- opt_bool("channel_chat_created")
   use migrate_to_chat_id <- opt_int("migrate_to_chat_id")
   use migrate_from_chat_id <- opt_int("migrate_from_chat_id")
-  use pinned_message <- decode.optional_field(
+  use pinned_message <- opt_nested(
     "pinned_message",
-    None,
-    decode.optional(decode.recursive(message_decoder)),
+    decode.recursive(message_decoder),
   )
-  use invoice <- decode.optional_field(
-    "invoice",
-    None,
-    decode.optional(invoice_decoder()),
-  )
-  use successful_payment <- decode.optional_field(
+  use invoice <- opt_nested("invoice", invoice_decoder())
+  use successful_payment <- opt_nested(
     "successful_payment",
-    None,
-    decode.optional(successful_payment_decoder()),
+    successful_payment_decoder(),
   )
-  use refunded_payment <- decode.optional_field(
+  use refunded_payment <- opt_nested(
     "refunded_payment",
-    None,
-    decode.optional(refunded_payment_decoder()),
+    refunded_payment_decoder(),
   )
   use connected_website <- opt_str("connected_website")
   use business_connection_id <- opt_str("business_connection_id")
@@ -1900,11 +1732,7 @@ pub type CallbackQuery {
 pub fn callback_query_decoder() -> Decoder(CallbackQuery) {
   use id <- decode.field("id", decode.string)
   use from <- decode.field("from", user_decoder())
-  use message <- decode.optional_field(
-    "message",
-    None,
-    decode.optional(message_decoder()),
-  )
+  use message <- opt_nested("message", message_decoder())
   use chat_instance <- decode.field("chat_instance", decode.string)
   use data <- opt_str("data")
   use inline_message_id <- opt_str("inline_message_id")
@@ -1941,11 +1769,7 @@ pub fn inline_query_decoder() -> Decoder(InlineQuery) {
   use query <- decode.field("query", decode.string)
   use offset <- decode.field("offset", decode.string)
   use chat_type <- opt_str("chat_type")
-  use location <- decode.optional_field(
-    "location",
-    None,
-    decode.optional(location_decoder()),
-  )
+  use location <- opt_nested("location", location_decoder())
   decode.success(InlineQuery(id:, from:, query:, offset:, chat_type:, location:))
 }
 
@@ -1962,11 +1786,7 @@ pub type ChosenInlineResult {
 pub fn chosen_inline_result_decoder() -> Decoder(ChosenInlineResult) {
   use result_id <- decode.field("result_id", decode.string)
   use from <- decode.field("from", user_decoder())
-  use location <- decode.optional_field(
-    "location",
-    None,
-    decode.optional(location_decoder()),
-  )
+  use location <- opt_nested("location", location_decoder())
   use inline_message_id <- opt_str("inline_message_id")
   use query <- decode.field("query", decode.string)
   decode.success(ChosenInlineResult(
@@ -2022,151 +1842,163 @@ pub fn update_decoder() -> Decoder(Update) {
   decode.success(Update(update_id:, kind:))
 }
 
+/// Decoder helper for `update_kind_decoder`'s ~20 mutually-exclusive
+/// optional envelope fields. Like `opt_nested`, but also wraps the decoded
+/// value in its `UpdateKind` constructor right at the decode site, so the
+/// constructor can't drift out of sync with the field it belongs to.
+fn opt_update(
+  key: String,
+  decoder: Decoder(a),
+  wrap: fn(a) -> UpdateKind,
+  next: fn(Option(UpdateKind)) -> Decoder(t),
+) -> Decoder(t) {
+  decode.optional_field(
+    key,
+    None,
+    decode.optional(decode.map(decoder, wrap)),
+    next,
+  )
+}
+
 fn update_kind_decoder() -> Decoder(UpdateKind) {
-  use message <- decode.optional_field(
-    "message",
-    None,
-    decode.optional(message_decoder()),
-  )
-  use edited_message <- decode.optional_field(
+  use message <- opt_update("message", message_decoder(), MessageUpdate)
+  use edited_message <- opt_update(
     "edited_message",
-    None,
-    decode.optional(message_decoder()),
+    message_decoder(),
+    EditedMessageUpdate,
   )
-  use channel_post <- decode.optional_field(
+  use channel_post <- opt_update(
     "channel_post",
-    None,
-    decode.optional(message_decoder()),
+    message_decoder(),
+    ChannelPostUpdate,
   )
-  use edited_channel_post <- decode.optional_field(
+  use edited_channel_post <- opt_update(
     "edited_channel_post",
-    None,
-    decode.optional(message_decoder()),
+    message_decoder(),
+    EditedChannelPostUpdate,
   )
-  use business_connection <- decode.optional_field(
+  use business_connection <- opt_update(
     "business_connection",
-    None,
-    decode.optional(business_connection_decoder()),
+    business_connection_decoder(),
+    BusinessConnectionUpdate,
   )
-  use business_message <- decode.optional_field(
+  use business_message <- opt_update(
     "business_message",
-    None,
-    decode.optional(message_decoder()),
+    message_decoder(),
+    BusinessMessageUpdate,
   )
-  use edited_business_message <- decode.optional_field(
+  use edited_business_message <- opt_update(
     "edited_business_message",
-    None,
-    decode.optional(message_decoder()),
+    message_decoder(),
+    EditedBusinessMessageUpdate,
   )
-  use deleted_business_messages <- decode.optional_field(
+  use deleted_business_messages <- opt_update(
     "deleted_business_messages",
-    None,
-    decode.optional(business_messages_deleted_decoder()),
+    business_messages_deleted_decoder(),
+    DeletedBusinessMessagesUpdate,
   )
-  use message_reaction <- decode.optional_field(
+  use message_reaction <- opt_update(
     "message_reaction",
-    None,
-    decode.optional(message_reaction_updated_decoder()),
+    message_reaction_updated_decoder(),
+    MessageReactionUpdate,
   )
-  use message_reaction_count <- decode.optional_field(
+  use message_reaction_count <- opt_update(
     "message_reaction_count",
-    None,
-    decode.optional(message_reaction_count_updated_decoder()),
+    message_reaction_count_updated_decoder(),
+    MessageReactionCountUpdate,
   )
-  use inline_query <- decode.optional_field(
+  use inline_query <- opt_update(
     "inline_query",
-    None,
-    decode.optional(inline_query_decoder()),
+    inline_query_decoder(),
+    InlineQueryUpdate,
   )
-  use chosen_inline_result <- decode.optional_field(
+  use chosen_inline_result <- opt_update(
     "chosen_inline_result",
-    None,
-    decode.optional(chosen_inline_result_decoder()),
+    chosen_inline_result_decoder(),
+    ChosenInlineResultUpdate,
   )
-  use callback_query <- decode.optional_field(
+  use callback_query <- opt_update(
     "callback_query",
-    None,
-    decode.optional(callback_query_decoder()),
+    callback_query_decoder(),
+    CallbackQueryUpdate,
   )
-  use shipping_query <- decode.optional_field(
+  use shipping_query <- opt_update(
     "shipping_query",
-    None,
-    decode.optional(shipping_query_decoder()),
+    shipping_query_decoder(),
+    ShippingQueryUpdate,
   )
-  use pre_checkout_query <- decode.optional_field(
+  use pre_checkout_query <- opt_update(
     "pre_checkout_query",
-    None,
-    decode.optional(pre_checkout_query_decoder()),
+    pre_checkout_query_decoder(),
+    PreCheckoutQueryUpdate,
   )
-  use poll <- decode.optional_field(
-    "poll",
-    None,
-    decode.optional(poll_decoder()),
-  )
-  use poll_answer <- decode.optional_field(
+  use poll <- opt_update("poll", poll_decoder(), PollUpdate)
+  use poll_answer <- opt_update(
     "poll_answer",
-    None,
-    decode.optional(poll_answer_decoder()),
+    poll_answer_decoder(),
+    PollAnswerUpdate,
   )
-  use my_chat_member <- decode.optional_field(
+  use my_chat_member <- opt_update(
     "my_chat_member",
-    None,
-    decode.optional(chat_member_updated_decoder()),
+    chat_member_updated_decoder(),
+    MyChatMemberUpdate,
   )
-  use chat_member <- decode.optional_field(
+  use chat_member <- opt_update(
     "chat_member",
-    None,
-    decode.optional(chat_member_updated_decoder()),
+    chat_member_updated_decoder(),
+    ChatMemberUpdate,
   )
-  use chat_join_request <- decode.optional_field(
+  use chat_join_request <- opt_update(
     "chat_join_request",
-    None,
-    decode.optional(chat_join_request_decoder()),
+    chat_join_request_decoder(),
+    ChatJoinRequestUpdate,
   )
-  use chat_boost <- decode.optional_field(
+  use chat_boost <- opt_update(
     "chat_boost",
-    None,
-    decode.optional(chat_boost_updated_decoder()),
+    chat_boost_updated_decoder(),
+    ChatBoostUpdate,
   )
-  use removed_chat_boost <- decode.optional_field(
+  use removed_chat_boost <- opt_update(
     "removed_chat_boost",
-    None,
-    decode.optional(chat_boost_removed_decoder()),
+    chat_boost_removed_decoder(),
+    RemovedChatBoostUpdate,
   )
-  use purchased_paid_media <- decode.optional_field(
+  use purchased_paid_media <- opt_update(
     "purchased_paid_media",
-    None,
-    decode.optional(paid_media_purchased_decoder()),
+    paid_media_purchased_decoder(),
+    PurchasedPaidMediaUpdate,
   )
 
   // The Telegram envelope is "all variants optional, exactly one
   // present" — list each candidate in canonical order and pick the
   // first present one. `OtherUpdate` is the catch-all so the bot stays
-  // robust against future Telegram additions.
+  // robust against future Telegram additions. Constructors are now
+  // applied at the decode site via `opt_update`, so this list only needs
+  // to preserve ordering.
   let candidates = [
-    option.map(message, MessageUpdate),
-    option.map(edited_message, EditedMessageUpdate),
-    option.map(channel_post, ChannelPostUpdate),
-    option.map(edited_channel_post, EditedChannelPostUpdate),
-    option.map(business_connection, BusinessConnectionUpdate),
-    option.map(business_message, BusinessMessageUpdate),
-    option.map(edited_business_message, EditedBusinessMessageUpdate),
-    option.map(deleted_business_messages, DeletedBusinessMessagesUpdate),
-    option.map(message_reaction, MessageReactionUpdate),
-    option.map(message_reaction_count, MessageReactionCountUpdate),
-    option.map(inline_query, InlineQueryUpdate),
-    option.map(chosen_inline_result, ChosenInlineResultUpdate),
-    option.map(callback_query, CallbackQueryUpdate),
-    option.map(shipping_query, ShippingQueryUpdate),
-    option.map(pre_checkout_query, PreCheckoutQueryUpdate),
-    option.map(poll, PollUpdate),
-    option.map(poll_answer, PollAnswerUpdate),
-    option.map(my_chat_member, MyChatMemberUpdate),
-    option.map(chat_member, ChatMemberUpdate),
-    option.map(chat_join_request, ChatJoinRequestUpdate),
-    option.map(chat_boost, ChatBoostUpdate),
-    option.map(removed_chat_boost, RemovedChatBoostUpdate),
-    option.map(purchased_paid_media, PurchasedPaidMediaUpdate),
+    message,
+    edited_message,
+    channel_post,
+    edited_channel_post,
+    business_connection,
+    business_message,
+    edited_business_message,
+    deleted_business_messages,
+    message_reaction,
+    message_reaction_count,
+    inline_query,
+    chosen_inline_result,
+    callback_query,
+    shipping_query,
+    pre_checkout_query,
+    poll,
+    poll_answer,
+    my_chat_member,
+    chat_member,
+    chat_join_request,
+    chat_boost,
+    removed_chat_boost,
+    purchased_paid_media,
   ]
   let kind =
     list.find_map(candidates, option.to_result(_, Nil))
@@ -2244,11 +2076,7 @@ pub fn webhook_info_decoder() -> Decoder(WebhookInfo) {
     "last_synchronization_error_date",
   )
   use max_connections <- opt_int("max_connections")
-  use allowed_updates <- decode.optional_field(
-    "allowed_updates",
-    [],
-    decode.list(decode.string),
-  )
+  use allowed_updates <- opt_list("allowed_updates", decode.string)
   decode.success(WebhookInfo(
     url:,
     has_custom_certificate:,

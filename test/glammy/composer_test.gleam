@@ -4,10 +4,10 @@
 //// the composer value through reassignments. All behavioural
 //// assertions carry over.
 
-import glammy/api
 import glammy/composer
 import glammy/context
 import glammy/filter
+import glammy/helpers.{ctx_from, dummy_api}
 import glammy/types.{type Update}
 import gleam/erlang/process
 import gleam/int
@@ -16,15 +16,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
-
-fn dummy_api() -> api.Api {
-  api.new("0:test")
-}
-
-fn ctx_from(body: String) -> context.Context {
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  context.new(u, dummy_api())
-}
 
 const message_test_body = "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"test\"}}"
 
@@ -247,8 +238,8 @@ pub fn chat_type_filters_correctly_test() {
   let s: process.Subject(String) = process.new_subject()
   let comp =
     composer.new()
-    |> composer.chat_type("private", fn(_) { process.send(s, "private") })
-    |> composer.chat_type("channel", fn(_) { process.send(s, "channel") })
+    |> composer.chat_type(types.Private, fn(_) { process.send(s, "private") })
+    |> composer.chat_type(types.Channel, fn(_) { process.send(s, "channel") })
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(channel_post_body))
   assert collect_all(s) == ["private", "channel"]
