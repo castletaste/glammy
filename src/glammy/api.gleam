@@ -49,6 +49,7 @@ pub type ChatId {
   ChatUsername(String)
 }
 
+/// Encode a `ChatId` as JSON for Bot API payloads.
 pub fn chat_id_to_json(id: ChatId) -> json.Json {
   case id {
     ChatIntId(n) -> json.int(n)
@@ -56,6 +57,7 @@ pub fn chat_id_to_json(id: ChatId) -> json.Json {
   }
 }
 
+/// Render a `ChatId` as the string form used in multipart fields.
 pub fn chat_id_to_string(id: ChatId) -> String {
   case id {
     ChatIntId(n) -> int.to_string(n)
@@ -343,22 +345,27 @@ fn file_to_parts(
 //                           Read-only methods
 // =====================================================================
 
+/// Call Telegram's `getMe` method.
 pub fn get_me(api: Api) -> Result(User, GlammyError) {
   call(api, "getMe", [], user_decoder())
 }
 
+/// Call Telegram's `logOut` method.
 pub fn log_out(api: Api) -> Result(Bool, GlammyError) {
   call(api, "logOut", [], decode.bool)
 }
 
+/// Call Telegram's `close` method.
 pub fn close(api: Api) -> Result(Bool, GlammyError) {
   call(api, "close", [], decode.bool)
 }
 
+/// Call Telegram's `getWebhookInfo` method.
 pub fn get_webhook_info(api: Api) -> Result(WebhookInfo, GlammyError) {
   call(api, "getWebhookInfo", [], webhook_info_decoder())
 }
 
+/// Call Telegram's `getUpdates` method.
 pub fn get_updates(
   api: Api,
   offset offset: Option(Int),
@@ -377,6 +384,7 @@ pub fn get_updates(
   call(api, "getUpdates", fields, decode.list(update_decoder()))
 }
 
+/// Call Telegram's `setWebhook` method.
 pub fn set_webhook(
   api: Api,
   url: String,
@@ -408,6 +416,7 @@ pub type SetWebhookOptions {
   )
 }
 
+/// Default options for `set_webhook`.
 pub fn default_set_webhook_options() -> SetWebhookOptions {
   SetWebhookOptions(
     ip_address: None,
@@ -418,6 +427,7 @@ pub fn default_set_webhook_options() -> SetWebhookOptions {
   )
 }
 
+/// Call Telegram's `deleteWebhook` method.
 pub fn delete_webhook(
   api: Api,
   drop_pending_updates: Option(Bool),
@@ -445,6 +455,7 @@ pub type SendMessageOptions {
   )
 }
 
+/// Default options for `send_message`.
 pub fn default_send_message_options() -> SendMessageOptions {
   SendMessageOptions(
     parse_mode: None,
@@ -458,6 +469,7 @@ pub fn default_send_message_options() -> SendMessageOptions {
   )
 }
 
+/// Call Telegram's `sendMessage` method.
 pub fn send_message(
   api: Api,
   chat_id: ChatId,
@@ -493,6 +505,7 @@ pub fn send_message(
   call(api, "sendMessage", fields, message_decoder())
 }
 
+/// Call Telegram's `forwardMessage` method.
 pub fn forward_message(
   api: Api,
   chat_id: ChatId,
@@ -511,6 +524,7 @@ pub fn forward_message(
   )
 }
 
+/// Call Telegram's `forwardMessages` method.
 pub fn forward_messages(
   api: Api,
   chat_id: ChatId,
@@ -532,6 +546,7 @@ pub fn forward_messages(
   )
 }
 
+/// Call Telegram's `copyMessage` method.
 pub fn copy_message(
   api: Api,
   chat_id: ChatId,
@@ -552,6 +567,7 @@ pub fn copy_message(
   })
 }
 
+/// Call Telegram's `deleteMessage` method.
 pub fn delete_message(
   api: Api,
   chat_id: ChatId,
@@ -568,6 +584,7 @@ pub fn delete_message(
   )
 }
 
+/// Call Telegram's `deleteMessages` method.
 pub fn delete_messages(
   api: Api,
   chat_id: ChatId,
@@ -584,6 +601,7 @@ pub fn delete_messages(
   )
 }
 
+/// Call Telegram's `editMessageText` method.
 pub fn edit_message_text(
   api: Api,
   chat_id: ChatId,
@@ -603,6 +621,7 @@ pub fn edit_message_text(
   call(api, "editMessageText", fields, message_decoder())
 }
 
+/// Call Telegram's `editMessageCaption` method.
 pub fn edit_message_caption(
   api: Api,
   chat_id: ChatId,
@@ -622,6 +641,7 @@ pub fn edit_message_caption(
   call(api, "editMessageCaption", fields, message_decoder())
 }
 
+/// Call Telegram's `editMessageReplyMarkup` method.
 pub fn edit_message_reply_markup(
   api: Api,
   chat_id: ChatId,
@@ -637,6 +657,7 @@ pub fn edit_message_reply_markup(
   call(api, "editMessageReplyMarkup", fields, message_decoder())
 }
 
+/// Call Telegram's `stopPoll` method.
 pub fn stop_poll(
   api: Api,
   chat_id: ChatId,
@@ -653,6 +674,7 @@ pub fn stop_poll(
   )
 }
 
+/// Call Telegram's `sendChatAction` method.
 pub fn send_chat_action(
   api: Api,
   chat_id: ChatId,
@@ -688,6 +710,7 @@ pub type SendMediaOptions {
   )
 }
 
+/// Default options shared by media send helpers.
 pub fn default_send_media_options() -> SendMediaOptions {
   SendMediaOptions(
     caption: None,
@@ -745,6 +768,7 @@ fn send_media_via_multipart(
   call_multipart(api, method, with_options, message_decoder())
 }
 
+/// Call Telegram's `sendPhoto` method.
 pub fn send_photo(
   api: Api,
   chat_id: ChatId,
@@ -762,6 +786,7 @@ pub fn send_photo(
   )
 }
 
+/// Call Telegram's `sendDocument` method.
 pub fn send_document(
   api: Api,
   chat_id: ChatId,
@@ -779,6 +804,7 @@ pub fn send_document(
   )
 }
 
+/// Call Telegram's `sendVideo` method.
 pub fn send_video(
   api: Api,
   chat_id: ChatId,
@@ -804,6 +830,7 @@ pub fn send_video(
   )
 }
 
+/// Call Telegram's `sendAudio` method.
 pub fn send_audio(
   api: Api,
   chat_id: ChatId,
@@ -829,6 +856,7 @@ pub fn send_audio(
   )
 }
 
+/// Call Telegram's `sendVoice` method.
 pub fn send_voice(
   api: Api,
   chat_id: ChatId,
@@ -848,6 +876,7 @@ pub fn send_voice(
   )
 }
 
+/// Call Telegram's `sendAnimation` method.
 pub fn send_animation(
   api: Api,
   chat_id: ChatId,
@@ -873,6 +902,7 @@ pub fn send_animation(
   )
 }
 
+/// Call Telegram's `sendVideoNote` method.
 pub fn send_video_note(
   api: Api,
   chat_id: ChatId,
@@ -896,6 +926,7 @@ pub fn send_video_note(
   )
 }
 
+/// Call Telegram's `sendSticker` method.
 pub fn send_sticker(
   api: Api,
   chat_id: ChatId,
@@ -917,6 +948,7 @@ pub fn send_sticker(
 //                         Location / Venue / Contact / Poll / Dice
 // =====================================================================
 
+/// Call Telegram's `sendLocation` method.
 pub fn send_location(
   api: Api,
   chat_id: ChatId,
@@ -934,6 +966,7 @@ pub fn send_location(
   call(api, "sendLocation", fields, message_decoder())
 }
 
+/// Call Telegram's `sendVenue` method.
 pub fn send_venue(
   api: Api,
   chat_id: ChatId,
@@ -952,6 +985,7 @@ pub fn send_venue(
   call(api, "sendVenue", fields, message_decoder())
 }
 
+/// Call Telegram's `sendContact` method.
 pub fn send_contact(
   api: Api,
   chat_id: ChatId,
@@ -969,6 +1003,7 @@ pub fn send_contact(
   call(api, "sendContact", fields, message_decoder())
 }
 
+/// Call Telegram's `sendDice` method.
 pub fn send_dice(
   api: Api,
   chat_id: ChatId,
@@ -996,6 +1031,7 @@ pub type SendPollOptions {
   )
 }
 
+/// Default options for `send_poll`.
 pub fn default_send_poll_options() -> SendPollOptions {
   SendPollOptions(
     is_anonymous: None,
@@ -1012,6 +1048,7 @@ pub fn default_send_poll_options() -> SendPollOptions {
   )
 }
 
+/// Call Telegram's `sendPoll` method.
 pub fn send_poll(
   api: Api,
   chat_id: ChatId,
@@ -1063,6 +1100,7 @@ pub type AnswerCallbackQueryOptions {
   )
 }
 
+/// Default options for `answer_callback_query`.
 pub fn default_answer_callback_query_options() -> AnswerCallbackQueryOptions {
   AnswerCallbackQueryOptions(
     text: None,
@@ -1072,6 +1110,7 @@ pub fn default_answer_callback_query_options() -> AnswerCallbackQueryOptions {
   )
 }
 
+/// Call Telegram's `answerCallbackQuery` method.
 pub fn answer_callback_query(
   api: Api,
   callback_query_id: String,
@@ -1086,6 +1125,7 @@ pub fn answer_callback_query(
   call(api, "answerCallbackQuery", fields, decode.bool)
 }
 
+/// Call Telegram's `answerInlineQuery` method.
 pub fn answer_inline_query(
   api: Api,
   inline_query_id: String,
@@ -1105,6 +1145,7 @@ pub fn answer_inline_query(
   call(api, "answerInlineQuery", fields, decode.bool)
 }
 
+/// Call Telegram's `answerShippingQuery` method.
 pub fn answer_shipping_query(
   api: Api,
   shipping_query_id: String,
@@ -1122,6 +1163,7 @@ pub fn answer_shipping_query(
   call(api, "answerShippingQuery", fields, decode.bool)
 }
 
+/// Call Telegram's `answerPreCheckoutQuery` method.
 pub fn answer_pre_checkout_query(
   api: Api,
   pre_checkout_query_id: String,
@@ -1141,6 +1183,7 @@ pub fn answer_pre_checkout_query(
 //                       Chat management
 // =====================================================================
 
+/// Call Telegram's `banChatMember` method.
 pub fn ban_chat_member(
   api: Api,
   chat_id: ChatId,
@@ -1158,6 +1201,7 @@ pub fn ban_chat_member(
   call(api, "banChatMember", fields, decode.bool)
 }
 
+/// Call Telegram's `unbanChatMember` method.
 pub fn unban_chat_member(
   api: Api,
   chat_id: ChatId,
@@ -1173,6 +1217,7 @@ pub fn unban_chat_member(
   call(api, "unbanChatMember", fields, decode.bool)
 }
 
+/// Call Telegram's `restrictChatMember` method.
 pub fn restrict_chat_member(
   api: Api,
   chat_id: ChatId,
@@ -1190,6 +1235,7 @@ pub fn restrict_chat_member(
   call(api, "restrictChatMember", fields, decode.bool)
 }
 
+/// Call Telegram's `promoteChatMember` method.
 pub fn promote_chat_member(
   api: Api,
   chat_id: ChatId,
@@ -1255,6 +1301,7 @@ pub type PromoteRights {
   )
 }
 
+/// Default empty rights set for `promote_chat_member`.
 pub fn default_promote_rights() -> PromoteRights {
   PromoteRights(
     is_anonymous: None,
@@ -1275,6 +1322,7 @@ pub fn default_promote_rights() -> PromoteRights {
   )
 }
 
+/// Call Telegram's `setChatAdministratorCustomTitle` method.
 pub fn set_chat_administrator_custom_title(
   api: Api,
   chat_id: ChatId,
@@ -1293,6 +1341,7 @@ pub fn set_chat_administrator_custom_title(
   )
 }
 
+/// Call Telegram's `setChatPermissions` method.
 pub fn set_chat_permissions(
   api: Api,
   chat_id: ChatId,
@@ -1309,6 +1358,7 @@ pub fn set_chat_permissions(
   )
 }
 
+/// Call Telegram's `exportChatInviteLink` method.
 pub fn export_chat_invite_link(
   api: Api,
   chat_id: ChatId,
@@ -1321,6 +1371,7 @@ pub fn export_chat_invite_link(
   )
 }
 
+/// Call Telegram's `createChatInviteLink` method.
 pub fn create_chat_invite_link(
   api: Api,
   chat_id: ChatId,
@@ -1338,6 +1389,7 @@ pub fn create_chat_invite_link(
   call(api, "createChatInviteLink", fields, chat_invite_link_decoder())
 }
 
+/// Call Telegram's `editChatInviteLink` method.
 pub fn edit_chat_invite_link(
   api: Api,
   chat_id: ChatId,
@@ -1359,6 +1411,7 @@ pub fn edit_chat_invite_link(
   call(api, "editChatInviteLink", fields, chat_invite_link_decoder())
 }
 
+/// Call Telegram's `revokeChatInviteLink` method.
 pub fn revoke_chat_invite_link(
   api: Api,
   chat_id: ChatId,
@@ -1392,6 +1445,7 @@ fn chat_join_request_action(
   )
 }
 
+/// Call Telegram's `approveChatJoinRequest` method.
 pub fn approve_chat_join_request(
   api: Api,
   chat_id: ChatId,
@@ -1400,6 +1454,7 @@ pub fn approve_chat_join_request(
   chat_join_request_action(api, "approveChatJoinRequest", chat_id, user_id)
 }
 
+/// Call Telegram's `declineChatJoinRequest` method.
 pub fn decline_chat_join_request(
   api: Api,
   chat_id: ChatId,
@@ -1408,6 +1463,7 @@ pub fn decline_chat_join_request(
   chat_join_request_action(api, "declineChatJoinRequest", chat_id, user_id)
 }
 
+/// Call Telegram's `setChatTitle` method.
 pub fn set_chat_title(
   api: Api,
   chat_id: ChatId,
@@ -1421,6 +1477,7 @@ pub fn set_chat_title(
   )
 }
 
+/// Call Telegram's `setChatDescription` method.
 pub fn set_chat_description(
   api: Api,
   chat_id: ChatId,
@@ -1437,6 +1494,7 @@ pub fn set_chat_description(
   )
 }
 
+/// Call Telegram's `pinChatMessage` method.
 pub fn pin_chat_message(
   api: Api,
   chat_id: ChatId,
@@ -1452,6 +1510,7 @@ pub fn pin_chat_message(
   call(api, "pinChatMessage", fields, decode.bool)
 }
 
+/// Call Telegram's `unpinChatMessage` method.
 pub fn unpin_chat_message(
   api: Api,
   chat_id: ChatId,
@@ -1463,6 +1522,7 @@ pub fn unpin_chat_message(
   call(api, "unpinChatMessage", fields, decode.bool)
 }
 
+/// Call Telegram's `unpinAllChatMessages` method.
 pub fn unpin_all_chat_messages(
   api: Api,
   chat_id: ChatId,
@@ -1475,10 +1535,12 @@ pub fn unpin_all_chat_messages(
   )
 }
 
+/// Call Telegram's `leaveChat` method.
 pub fn leave_chat(api: Api, chat_id: ChatId) -> Result(Bool, GlammyError) {
   call(api, "leaveChat", [#("chat_id", chat_id_to_json(chat_id))], decode.bool)
 }
 
+/// Call Telegram's `getChatMember` method.
 pub fn get_chat_member(
   api: Api,
   chat_id: ChatId,
@@ -1495,6 +1557,7 @@ pub fn get_chat_member(
   )
 }
 
+/// Call Telegram's `getChatAdministrators` method.
 pub fn get_chat_administrators(
   api: Api,
   chat_id: ChatId,
@@ -1507,6 +1570,7 @@ pub fn get_chat_administrators(
   )
 }
 
+/// Call Telegram's `getChatMemberCount` method.
 pub fn get_chat_member_count(
   api: Api,
   chat_id: ChatId,
@@ -1523,6 +1587,7 @@ pub fn get_chat_member_count(
 //                              Files
 // =====================================================================
 
+/// Call Telegram's `getFile` method.
 pub fn get_file(api: Api, file_id: String) -> Result(File, GlammyError) {
   call(api, "getFile", [#("file_id", json.string(file_id))], file_decoder())
 }
@@ -1554,6 +1619,7 @@ fn set_my_string(
   call(api, method, fields, decode.bool)
 }
 
+/// Call Telegram's `setMyCommands` method.
 pub fn set_my_commands(
   api: Api,
   commands: List(#(String, String)),
@@ -1576,6 +1642,7 @@ pub fn set_my_commands(
   call(api, "setMyCommands", fields, decode.bool)
 }
 
+/// Call Telegram's `getMyCommands` method.
 pub fn get_my_commands(
   api: Api,
   scope: Option(json.Json),
@@ -1589,6 +1656,7 @@ pub fn get_my_commands(
   )
 }
 
+/// Call Telegram's `deleteMyCommands` method.
 pub fn delete_my_commands(
   api: Api,
   scope: Option(json.Json),
@@ -1602,6 +1670,7 @@ pub fn delete_my_commands(
   )
 }
 
+/// Call Telegram's `setMyName` method.
 pub fn set_my_name(
   api: Api,
   name: Option(String),
@@ -1610,6 +1679,7 @@ pub fn set_my_name(
   set_my_string(api, "setMyName", "name", name, language_code)
 }
 
+/// Call Telegram's `setMyDescription` method.
 pub fn set_my_description(
   api: Api,
   description: Option(String),
@@ -1624,6 +1694,7 @@ pub fn set_my_description(
   )
 }
 
+/// Call Telegram's `setMyShortDescription` method.
 pub fn set_my_short_description(
   api: Api,
   short_description: Option(String),
@@ -1651,6 +1722,7 @@ pub type ForumTopic {
   )
 }
 
+/// Decode a Telegram `ForumTopic` value from JSON.
 pub fn forum_topic_decoder() -> Decoder(ForumTopic) {
   use message_thread_id <- decode.field("message_thread_id", decode.int)
   use name <- decode.field("name", decode.string)
@@ -1668,6 +1740,7 @@ pub fn forum_topic_decoder() -> Decoder(ForumTopic) {
   ))
 }
 
+/// Call Telegram's `createForumTopic` method.
 pub fn create_forum_topic(
   api: Api,
   chat_id: ChatId,
@@ -1682,6 +1755,7 @@ pub fn create_forum_topic(
   call(api, "createForumTopic", fields, forum_topic_decoder())
 }
 
+/// Call Telegram's `editForumTopic` method.
 pub fn edit_forum_topic(
   api: Api,
   chat_id: ChatId,
@@ -1716,6 +1790,7 @@ fn forum_topic_action(
   )
 }
 
+/// Call Telegram's `closeForumTopic` method.
 pub fn close_forum_topic(
   api: Api,
   chat_id: ChatId,
@@ -1724,6 +1799,7 @@ pub fn close_forum_topic(
   forum_topic_action(api, "closeForumTopic", chat_id, message_thread_id)
 }
 
+/// Call Telegram's `reopenForumTopic` method.
 pub fn reopen_forum_topic(
   api: Api,
   chat_id: ChatId,
@@ -1732,6 +1808,7 @@ pub fn reopen_forum_topic(
   forum_topic_action(api, "reopenForumTopic", chat_id, message_thread_id)
 }
 
+/// Call Telegram's `deleteForumTopic` method.
 pub fn delete_forum_topic(
   api: Api,
   chat_id: ChatId,
@@ -1740,6 +1817,7 @@ pub fn delete_forum_topic(
   forum_topic_action(api, "deleteForumTopic", chat_id, message_thread_id)
 }
 
+/// Call Telegram's `unpinAllForumTopicMessages` method.
 pub fn unpin_all_forum_topic_messages(
   api: Api,
   chat_id: ChatId,
@@ -1757,6 +1835,7 @@ pub fn unpin_all_forum_topic_messages(
 //                              Reactions
 // =====================================================================
 
+/// Call Telegram's `setMessageReaction` method.
 pub fn set_message_reaction(
   api: Api,
   chat_id: ChatId,
@@ -1810,6 +1889,7 @@ pub type SendInvoiceOptions {
   )
 }
 
+/// Call Telegram's `sendInvoice` method.
 pub fn send_invoice(
   api: Api,
   chat_id: ChatId,
@@ -1879,6 +1959,7 @@ pub fn send_invoice(
   call(api, "sendInvoice", fields, message_decoder())
 }
 
+/// Call Telegram's `refundStarPayment` method.
 pub fn refund_star_payment(
   api: Api,
   user_id: Int,
@@ -1899,6 +1980,7 @@ pub fn refund_star_payment(
 //                              Games
 // =====================================================================
 
+/// Call Telegram's `sendGame` method.
 pub fn send_game(
   api: Api,
   chat_id: ChatId,
@@ -1915,6 +1997,7 @@ pub fn send_game(
   )
 }
 
+/// Call Telegram's `setGameScore` method.
 pub fn set_game_score(
   api: Api,
   user_id: Int,
@@ -1947,10 +2030,12 @@ fn parse_with(body: String, decoder: Decoder(t)) -> Result(t, String) {
   |> result.map_error(describe_json_error)
 }
 
+/// Parse a webhook JSON body into an `Update`.
 pub fn parse_update(body: String) -> Result(Update, String) {
   parse_with(body, update_decoder())
 }
 
+/// Parse a JSON body into a `CallbackQuery`.
 pub fn parse_callback_query(body: String) -> Result(CallbackQuery, String) {
   parse_with(body, callback_query_decoder())
 }

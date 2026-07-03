@@ -30,6 +30,7 @@ pub type Encoded {
 
 const crlf: BitArray = <<"\r\n":utf8>>
 
+/// Encode text and file parts into a multipart/form-data body.
 pub fn encode(parts: List(Part)) -> Encoded {
   let boundary = random_boundary()
   let body =

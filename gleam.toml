@@ -3,6 +3,11 @@ version = "0.1.0"
 description = "A Telegram Bot Framework for Gleam — a port of grammY (https://github.com/grammyjs/grammY)."
 licences = ["MIT"]
 target = "erlang"
+repository = { type = "github", user = "castletaste", repo = "glammy" }
+links = [
+  { title = "GitHub", href = "https://github.com/castletaste/glammy" },
+  { title = "grammY", href = "https://grammy.dev" },
+]
 
 # Dependencies are pinned and all from the official `gleam-lang` GitHub org on
 # hex.pm. Do not add any third-party deps without explicit vetting — bot tokens

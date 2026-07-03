@@ -36,6 +36,7 @@ pub opaque type Storage(value) {
   )
 }
 
+/// Build a storage adapter from `get`, `set`, and `delete` functions.
 pub fn custom_storage(
   get get: fn(String) -> Option(value),
   set set: fn(String, value) -> Nil,
@@ -44,14 +45,17 @@ pub fn custom_storage(
   Storage(get:, set:, delete:)
 }
 
+/// Read a value from a `Storage` adapter.
 pub fn storage_get(storage: Storage(value), key: String) -> Option(value) {
   storage.get(key)
 }
 
+/// Write a value through a `Storage` adapter.
 pub fn storage_set(storage: Storage(value), key: String, value: value) -> Nil {
   storage.set(key, value)
 }
 
+/// Delete a value through a `Storage` adapter.
 pub fn storage_delete(storage: Storage(value), key: String) -> Nil {
   storage.delete(key)
 }

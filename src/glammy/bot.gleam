@@ -32,6 +32,7 @@ pub type PollingOptions {
   )
 }
 
+/// Default long-polling options for `start`.
 pub fn default_polling_options() -> PollingOptions {
   PollingOptions(
     limit: 100,
@@ -46,6 +47,7 @@ pub opaque type Bot {
   Bot(api: Api, composer: Composer, error_handler: fn(GlammyError) -> Nil)
 }
 
+/// Create a bot from an `Api` client and a `Composer` chain.
 pub fn new(api: Api, composer: Composer) -> Bot {
   Bot(api:, composer:, error_handler: default_error_handler)
 }
