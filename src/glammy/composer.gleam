@@ -51,18 +51,10 @@ pub fn handle(composer: Composer, handler: fn(Context) -> Nil) -> Composer {
 /// update.
 pub fn on(
   composer: Composer,
-  filter: Filter,
+  filter_: Filter,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case filter.matches(filter, ctx) {
-      True -> {
-        handler(ctx)
-        next()
-      }
-      False -> next()
-    }
-  })
+  when(composer, filter.matches(filter_, _), handler)
 }
 
 /// Append a handler that runs only when the parsed filter query
@@ -72,15 +64,7 @@ pub fn on_query(
   query: Query,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case filter.matches_query(query, ctx) {
-      True -> {
-        handler(ctx)
-        next()
-      }
-      False -> next()
-    }
-  })
+  when(composer, filter.matches_query(query, _), handler)
 }
 
 /// Append a handler that runs only when the predicate returns `True`.
@@ -89,15 +73,7 @@ pub fn filter(
   pred: fn(Context) -> Bool,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case pred(ctx) {
-      True -> {
-        handler(ctx)
-        next()
-      }
-      False -> next()
-    }
-  })
+  when(composer, pred, handler)
 }
 
 /// Append a handler that runs only when the predicate returns
@@ -107,15 +83,7 @@ pub fn drop(
   pred: fn(Context) -> Bool,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case pred(ctx) {
-      True -> next()
-      False -> {
-        handler(ctx)
-        next()
-      }
-    }
-  })
+  when(composer, fn(ctx) { !pred(ctx) }, handler)
 }
 
 /// If `pred(ctx)` is `True` run `on_true`, otherwise run `on_false`.
@@ -192,15 +160,16 @@ pub fn command(
   name: String,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case extract_command(ctx) {
-      Some(cmd) if cmd == name -> {
-        handler(ctx)
-        next()
+  when(
+    composer,
+    fn(ctx) {
+      case extract_command(ctx) {
+        Some(cmd) if cmd == name -> True
+        _ -> False
       }
-      _ -> next()
-    }
-  })
+    },
+    handler,
+  )
 }
 
 /// Like `command` but accepts a list of accepted names (OR).
@@ -209,19 +178,16 @@ pub fn command_any(
   names: List(String),
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case extract_command(ctx) {
-      Some(cmd) ->
-        case list.contains(names, cmd) {
-          True -> {
-            handler(ctx)
-            next()
-          }
-          False -> next()
-        }
-      None -> next()
-    }
-  })
+  when(
+    composer,
+    fn(ctx) {
+      case extract_command(ctx) {
+        Some(cmd) -> list.contains(names, cmd)
+        None -> False
+      }
+    },
+    handler,
+  )
 }
 
 /// Append a handler that fires when the message text *contains* the
@@ -232,19 +198,7 @@ pub fn hears(
   needle: String,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case context.message_text(ctx) {
-      Some(text) ->
-        case string.contains(text, needle) {
-          True -> {
-            handler(ctx)
-            next()
-          }
-          False -> next()
-        }
-      None -> next()
-    }
-  })
+  when(composer, text_pred(string.contains(_, needle)), handler)
 }
 
 /// Append a handler that fires when the message text passes the
@@ -255,19 +209,7 @@ pub fn hears_when(
   pred: fn(String) -> Bool,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case context.message_text(ctx) {
-      Some(text) ->
-        case pred(text) {
-          True -> {
-            handler(ctx)
-            next()
-          }
-          False -> next()
-        }
-      None -> next()
-    }
-  })
+  when(composer, text_pred(pred), handler)
 }
 
 /// Handle callback queries whose `data` exactly matches `expected`.
@@ -276,43 +218,30 @@ pub fn callback_query(
   expected: String,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    case context.has_callback_data(ctx, expected) {
-      True -> {
-        handler(ctx)
-        next()
-      }
-      False -> next()
-    }
-  })
+  when(composer, context.has_callback_data(_, expected), handler)
 }
 
-/// Filter on chat type ("private" / "group" / "supergroup" / "channel").
+/// Filter on chat type (`types.Private` / `types.Group` /
+/// `types.Supergroup` / `types.Channel`).
+///
+/// ```gleam
+/// composer.chat_type(composer, types.Private, handler)
+/// ```
 pub fn chat_type(
   composer: Composer,
-  type_: String,
+  type_: types.ChatType,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  use_middleware(composer, fn(ctx, next) {
-    let matches = case context.chat(ctx) {
-      Some(c) ->
-        case c.type_, type_ {
-          types.Private, "private" -> True
-          types.Group, "group" -> True
-          types.Supergroup, "supergroup" -> True
-          types.Channel, "channel" -> True
-          _, _ -> False
-        }
-      None -> False
-    }
-    case matches {
-      True -> {
-        handler(ctx)
-        next()
+  when(
+    composer,
+    fn(ctx) {
+      case context.chat(ctx) {
+        Some(c) -> c.type_ == type_
+        None -> False
       }
-      False -> next()
-    }
-  })
+    },
+    handler,
+  )
 }
 
 // =====================================================================
@@ -332,6 +261,37 @@ pub fn run(composer: Composer, ctx: Context) -> Nil {
 // =====================================================================
 //                          internals
 // =====================================================================
+
+/// Shared skeleton behind the filtering combinators: run `handler`
+/// and then always call `next` when `pred(ctx)` is `True`; otherwise
+/// just call `next`.
+fn when(
+  composer: Composer,
+  pred: fn(Context) -> Bool,
+  handler: fn(Context) -> Nil,
+) -> Composer {
+  use_middleware(composer, fn(ctx, next) {
+    case pred(ctx) {
+      True -> {
+        handler(ctx)
+        next()
+      }
+      False -> next()
+    }
+  })
+}
+
+/// Build a `Context` predicate from a `String` predicate, evaluated
+/// against the update's message text. `False` when there is no
+/// message text to test.
+fn text_pred(check: fn(String) -> Bool) -> fn(Context) -> Bool {
+  fn(ctx) {
+    case context.message_text(ctx) {
+      Some(text) -> check(text)
+      None -> False
+    }
+  }
+}
 
 fn extract_command(ctx: Context) -> option.Option(String) {
   case context.message(ctx) {

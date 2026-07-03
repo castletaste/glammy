@@ -247,8 +247,8 @@ pub fn chat_type_filters_correctly_test() {
   let s: process.Subject(String) = process.new_subject()
   let comp =
     composer.new()
-    |> composer.chat_type("private", fn(_) { process.send(s, "private") })
-    |> composer.chat_type("channel", fn(_) { process.send(s, "channel") })
+    |> composer.chat_type(types.Private, fn(_) { process.send(s, "private") })
+    |> composer.chat_type(types.Channel, fn(_) { process.send(s, "channel") })
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(channel_post_body))
   assert collect_all(s) == ["private", "channel"]
