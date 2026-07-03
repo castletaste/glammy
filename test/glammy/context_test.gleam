@@ -2,16 +2,9 @@
 //// shortcuts and value aggregators (msg, chat, from, msg_id, chat_id,
 //// inline_message_id, business_connection_id).
 
-import glammy/api
 import glammy/context
-import glammy/types
-import gleam/json
+import glammy/helpers.{ctx_from}
 import gleam/option.{None, Some}
-
-fn ctx_from(body: String) -> context.Context {
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  context.new(u, api.new("0:test"))
-}
 
 const message_update = "{\"update_id\":1,\"message\":{\"message_id\":42,\"date\":1700000000,\"chat\":{\"id\":100,\"type\":\"private\"},\"from\":{\"id\":7,\"is_bot\":false,\"first_name\":\"X\"},\"text\":\"a\",\"sender_chat\":{\"id\":200,\"type\":\"channel\",\"title\":\"ch\"}}}"
 

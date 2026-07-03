@@ -2,30 +2,15 @@
 //// `@grammyjs/conversations` is persistent / replayable; ours is a
 //// single-process linear flow. These tests pin down the contract.
 
-import glammy/api
 import glammy/composer
 import glammy/context
 import glammy/conversations
+import glammy/helpers.{dummy_api, message_update_from as make_message}
 import glammy/types.{type Update}
 import gleam/erlang/process
 import gleam/int
 import gleam/json
 import gleam/option.{Some}
-
-fn make_message(text: String, from_id: Int) -> Update {
-  let body =
-    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\""
-    <> text
-    <> "\",\"from\":{\"id\":"
-    <> int.to_string(from_id)
-    <> ",\"is_bot\":false,\"first_name\":\"X\"}}}"
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  u
-}
-
-fn dummy_api() -> api.Api {
-  api.new("0:test")
-}
 
 fn ask_command_update() -> Update {
   let assert Ok(u) =

@@ -7,6 +7,7 @@ import glammy/api
 import glammy/bot
 import glammy/composer
 import glammy/error
+import glammy/helpers.{dummy_api}
 import glammy/types.{type Update}
 import gleam/erlang/process
 import gleam/json
@@ -15,8 +16,7 @@ import gleam/option.{None, Some}
 const message_update_json = "{\"update_id\":1,\"message\":{\"message_id\":1,\"date\":0,\"chat\":{\"id\":123,\"type\":\"private\"},\"text\":\"x\"}}"
 
 fn make_update() -> Update {
-  let assert Ok(u) = json.parse(message_update_json, types.update_decoder())
-  u
+  helpers.update_from(message_update_json)
 }
 
 // =====================================================================
@@ -43,7 +43,7 @@ pub fn handle_update_processes_updates_test() {
       process.send(recorder, "handled")
       Nil
     })
-  let bot_ = bot.new(api.new("0:test"), comp)
+  let bot_ = bot.new(dummy_api(), comp)
   bot.handle_update(bot_, make_update())
   assert process.receive(recorder, 50) == Ok("handled")
 }
@@ -55,7 +55,7 @@ pub fn handle_update_runs_each_middleware_test() {
     |> composer.handle(fn(_) { process.send(recorder, "a") })
     |> composer.handle(fn(_) { process.send(recorder, "b") })
     |> composer.handle(fn(_) { process.send(recorder, "c") })
-  let bot_ = bot.new(api.new("0:test"), comp)
+  let bot_ = bot.new(dummy_api(), comp)
   bot.handle_update(bot_, make_update())
   assert process.receive(recorder, 50) == Ok("a")
   assert process.receive(recorder, 50) == Ok("b")
@@ -65,7 +65,7 @@ pub fn handle_update_runs_each_middleware_test() {
 pub fn handle_update_applies_transformers_to_api_test() {
   let captured: process.Subject(String) = process.new_subject()
   let api_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_transformer(fn(_next, method, _payload) {
       process.send(captured, method)
       Error(error.DecodeError(method: method, message: "stub"))
@@ -95,7 +95,7 @@ pub fn handle_update_continues_independent_updates_test() {
       process.send(recorder, ctx.update.update_id)
       Nil
     })
-  let bot_ = bot.new(api.new("0:test"), comp)
+  let bot_ = bot.new(dummy_api(), comp)
 
   let make = fn(id: Int) {
     let body =
@@ -126,7 +126,7 @@ pub fn on_error_replaces_default_handler_test() {
     Error(error.DecodeError(method: method, message: "custom failure"))
   }
   let _bot_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_transformer(stub_transformer)
     |> bot.new(composer.new())
     |> bot.on_error(fn(err) { process.send(caught, error.describe(err)) })
@@ -172,7 +172,7 @@ pub fn start_returns_error_on_failed_get_me_test() {
   // With a transformer that always errors out and verify_token=True,
   // start should return Error without entering the poll loop.
   let api_ =
-    api.new("0:test")
+    dummy_api()
     |> api.with_transformer(fn(_next, method, _payload) {
       Error(error.DecodeError(method: method, message: "stub"))
     })

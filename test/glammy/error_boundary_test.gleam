@@ -2,21 +2,17 @@
 //// Erlang errors/exits/throws raised by middleware so the bot's poll
 //// loop survives panicking handlers.
 
-import glammy/api
 import glammy/composer
 import glammy/context
 import glammy/error_boundary
+import glammy/helpers.{dummy_api}
 import glammy/types.{type Update}
 import gleam/erlang/process
-import gleam/json
 
 fn make_update() -> Update {
-  let assert Ok(u) =
-    json.parse(
-      "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}",
-      types.update_decoder(),
-    )
-  u
+  helpers.update_from(
+    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}",
+  )
 }
 
 fn run_with(boundary: composer.Middleware, post: fn(context.Context) -> Nil) {
@@ -24,7 +20,7 @@ fn run_with(boundary: composer.Middleware, post: fn(context.Context) -> Nil) {
     composer.new()
     |> composer.use_middleware(boundary)
     |> composer.handle(post)
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
+  composer.run(comp, context.new(make_update(), dummy_api()))
 }
 
 pub fn boundary_catches_panic_test() {
@@ -126,7 +122,7 @@ pub fn boundary_passes_caught_error_to_handler_test() {
   let comp =
     composer.new()
     |> composer.use_middleware(mw)
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
+  composer.run(comp, context.new(make_update(), dummy_api()))
   assert process.receive(inspected, 50) == Ok("ok-shape")
 }
 
@@ -156,7 +152,7 @@ pub fn nested_boundary_only_catches_inner_failure_test() {
     composer.new()
     |> composer.use_middleware(outer_mw)
     |> composer.handle(fn(_) { process.send(post, "post") })
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
+  composer.run(comp, context.new(make_update(), dummy_api()))
 
   assert process.receive(inner_caught, 50) == Ok("inner")
   assert process.receive(outer_caught, 50) == Error(Nil)

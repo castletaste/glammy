@@ -1,20 +1,8 @@
 //// Tests for the glammy filter-query DSL. Mirror the grammY suite
 //// (`test/filter.test.ts`) one-for-one where the behaviour applies.
 
-import glammy/api
-import glammy/context
 import glammy/filter
-import glammy/types.{type Update}
-import gleam/json
-
-fn make(body: String) -> Update {
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  u
-}
-
-fn ctx(u: Update) -> context.Context {
-  context.new(u, api.new("0:test"))
-}
+import glammy/helpers.{ctx_from}
 
 const message_text_body = "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}"
 
@@ -34,12 +22,12 @@ const message_italic_url_body = "{\"update_id\":8,\"message\":{\"message_id\":1,
 
 fn matches_str(query: String, body: String) -> Bool {
   let assert Ok(q) = filter.parse(query)
-  filter.matches_query(q, ctx(make(body)))
+  filter.matches_query(q, ctx_from(body))
 }
 
 fn matches_many(queries: List(String), body: String) -> Bool {
   let assert Ok(q) = filter.parse_many(queries)
-  filter.matches_query(q, ctx(make(body)))
+  filter.matches_query(q, ctx_from(body))
 }
 
 // =====================================================================

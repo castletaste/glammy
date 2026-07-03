@@ -155,6 +155,8 @@ original, and is genuinely awful to read).
 **Why the alternative was wrong:** Maintenance hazard. Adding a new
 Update variant required threading it through the nesting. The
 flat-list version is read top-to-bottom in canonical order.
+Constructors are applied at the decode site via the private
+`opt_update` helper, so the candidates list only preserves ordering.
 
 ## D-9. `decode.failure` placeholder is a top-level `const`, not a fn
 
@@ -291,10 +293,11 @@ called fresh every time. For values that exist purely as type-witnesses
 
 ## D-18. JSON helpers live in `internal/json_utils`
 
-**Decision:** `put_optional` / `opt_str` / `opt_int` / `opt_bool` /
-`opt_float` / `opt_with_default` are in
+**Decision:** `put_optional` / `put_optional_json` / `opt_str` /
+`opt_int` / `opt_bool` / `opt_float` / `opt_with_default` /
+`opt_nested` / `opt_list` are in
 `glammy/internal/json_utils.gleam`. Used by `api`, `types`,
-`inline_query_results`, `input_media`.
+`keyboard`, `inline_query_results`, `input_media`.
 
 **Why:** They were originally duplicated across each module (a clear
 DRY violation discovered during the idiomatic refactor). The
