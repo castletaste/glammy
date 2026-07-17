@@ -1,6 +1,6 @@
 import glammy/api
 import glammy/error
-import glammy/helpers.{dummy_api}
+import glammy/helpers.{dummy_api, receive_event}
 import gleam/erlang/process
 
 pub fn transformer_sees_method_name_test() {
@@ -12,7 +12,7 @@ pub fn transformer_sees_method_name_test() {
       Error(error.DecodeError(method:, message: "intercepted"))
     })
   let _ = api.get_me(api_)
-  assert process.receive(recorder, 50) == Ok("getMe")
+  assert receive_event(recorder) == Ok("getMe")
 }
 
 pub fn transformer_short_circuits_test() {
@@ -30,7 +30,7 @@ pub fn transformer_short_circuits_test() {
     })
 
   let _ = api.get_me(api_)
-  assert process.receive(recorder, 50) == Ok("short-circuited:getMe")
+  assert receive_event(recorder) == Ok("short-circuited:getMe")
 }
 
 pub fn transformer_chain_runs_in_order_test() {
@@ -55,13 +55,37 @@ pub fn transformer_chain_runs_in_order_test() {
     })
 
   let _ = api.get_me(api_)
-  assert collect_all(recorder)
+  assert collect_exact(recorder, 5)
     == ["before-a", "before-b", "stub-getMe", "after-b", "after-a"]
 }
 
-fn collect_all(s: process.Subject(String)) -> List(String) {
-  case process.receive(s, 50) {
-    Ok(v) -> [v, ..collect_all(s)]
-    Error(_) -> []
+pub fn outermost_transformer_precedes_existing_chain_test() {
+  let recorder: process.Subject(String) = process.new_subject()
+  let recording = fn(name: String) {
+    fn(next: api.ApiCallFn, method: String, payload: api.Payload) {
+      process.send(recorder, name)
+      next(method, payload)
+    }
+  }
+  let api_ =
+    dummy_api()
+    |> api.with_transformer(recording("user-a"))
+    |> api.with_transformer(fn(_next, method, _payload) {
+      process.send(recorder, "stub")
+      Error(error.DecodeError(method:, message: "stub"))
+    })
+    |> api.with_outermost_transformer(recording("infrastructure"))
+
+  let _ = api.get_me(api_)
+  assert collect_exact(recorder, 3) == ["infrastructure", "user-a", "stub"]
+}
+
+fn collect_exact(s: process.Subject(String), remaining: Int) -> List(String) {
+  case remaining <= 0 {
+    True -> []
+    False -> {
+      let assert Ok(value) = receive_event(s)
+      [value, ..collect_exact(s, remaining - 1)]
+    }
   }
 }

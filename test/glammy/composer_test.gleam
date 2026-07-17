@@ -7,14 +7,13 @@
 import glammy/composer
 import glammy/context
 import glammy/filter
-import glammy/helpers.{ctx_from, dummy_api}
+import glammy/helpers.{ctx_from, dummy_api, no_event, receive_event}
 import glammy/types.{type Update}
 import gleam/erlang/process
 import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/result
 import gleam/string
 
 const message_test_body = "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"test\"}}"
@@ -23,11 +22,26 @@ const channel_post_body = "{\"update_id\":2,\"channel_post\":{\"message_id\":1,\
 
 const callback_body = "{\"update_id\":3,\"callback_query\":{\"id\":\"x\",\"from\":{\"id\":1,\"is_bot\":false,\"first_name\":\"X\"},\"chat_instance\":\"i\",\"data\":\"cb\"}}"
 
+type ObservedExit {
+  ObservedExit(process.Down)
+}
+
 fn message_with_command(text: String, length: Int) -> Update {
   let body =
     "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\""
     <> text
     <> "\",\"entities\":[{\"type\":\"bot_command\",\"offset\":0,\"length\":"
+    <> int.to_string(length)
+    <> "}]}}"
+  let assert Ok(u) = json.parse(body, types.update_decoder())
+  u
+}
+
+fn message_with_caption_command(caption: String, length: Int) -> Update {
+  let body =
+    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"caption\":\""
+    <> caption
+    <> "\",\"caption_entities\":[{\"type\":\"bot_command\",\"offset\":0,\"length\":"
     <> int.to_string(length)
     <> "}]}}"
   let assert Ok(u) = json.parse(body, types.update_decoder())
@@ -44,7 +58,7 @@ pub fn calls_handlers_test() {
     composer.new()
     |> composer.handle(fn(_) { process.send(s, "handled") })
   composer.run(comp, ctx_from(message_test_body))
-  assert process.receive(s, 50) == Ok("handled")
+  assert receive_event(s) == Ok("handled")
 }
 
 pub fn next_short_circuits_when_not_called_test() {
@@ -54,8 +68,8 @@ pub fn next_short_circuits_when_not_called_test() {
     |> composer.use_middleware(fn(_, _) { process.send(s, "first") })
     |> composer.handle(fn(_) { process.send(s, "second") })
   composer.run(comp, ctx_from(message_test_body))
-  assert process.receive(s, 50) == Ok("first")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("first")
+  assert no_event(s)
 }
 
 pub fn next_propagates_when_called_test() {
@@ -68,7 +82,7 @@ pub fn next_propagates_when_called_test() {
     })
     |> composer.handle(fn(_) { process.send(s, "second") })
   composer.run(comp, ctx_from(message_test_body))
-  assert collect_all(s) == ["first", "second"]
+  assert collect_exact(s, 2) == ["first", "second"]
 }
 
 // =====================================================================
@@ -89,7 +103,7 @@ pub fn use_works_with_multiple_handlers_test() {
     })
     |> composer.handle(fn(_) { process.send(s, "c") })
   composer.run(comp, ctx_from(message_test_body))
-  assert collect_all(s) == ["a", "b", "c"]
+  assert collect_exact(s, 3) == ["a", "b", "c"]
 }
 
 pub fn use_can_append_other_composer_test() {
@@ -103,7 +117,7 @@ pub fn use_can_append_other_composer_test() {
     |> composer.handle(fn(_) { process.send(s, "parent") })
     |> composer.append(sub)
   composer.run(comp, ctx_from(message_test_body))
-  assert collect_all(s) == ["parent", "sub-a", "sub-b"]
+  assert collect_exact(s, 3) == ["parent", "sub-a", "sub-b"]
 }
 
 // =====================================================================
@@ -118,8 +132,8 @@ pub fn on_runs_filter_queries_test() {
     |> composer.on_query(q, fn(_) { process.send(s, "match") })
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(channel_post_body))
-  assert process.receive(s, 50) == Ok("match")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("match")
+  assert no_event(s)
 }
 
 pub fn on_filter_enum_works_test() {
@@ -130,8 +144,8 @@ pub fn on_filter_enum_works_test() {
     |> composer.on(filter.CallbackQuery, fn(_) { process.send(s, "cbq") })
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(callback_body))
-  assert process.receive(s, 50) == Ok("msg")
-  assert process.receive(s, 50) == Ok("cbq")
+  assert receive_event(s) == Ok("msg")
+  assert receive_event(s) == Ok("cbq")
 }
 
 // =====================================================================
@@ -144,23 +158,43 @@ pub fn hears_checks_for_text_test() {
     composer.new()
     |> composer.hears("test", fn(_) { process.send(s, "matched") })
   composer.run(comp, ctx_from(message_test_body))
-  assert process.receive(s, 50) == Ok("matched")
+  assert receive_event(s) == Ok("matched")
 }
 
-pub fn hears_when_regex_via_pred_test() {
-  // Substitute for grammY's regex chaining: use `hears_when` with a
-  // predicate that contains all required substrings.
+pub fn hears_checks_media_caption_test() {
   let s: process.Subject(String) = process.new_subject()
   let comp =
     composer.new()
-    |> composer.hears_when(
-      fn(text) {
-        string.starts_with(text, "te") && string.ends_with(text, "st")
-      },
-      fn(_) { process.send(s, "matched") },
-    )
+    |> composer.hears("a media caption", fn(_) { process.send(s, "matched") })
+  let body =
+    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"caption\":\"a media caption\"}}"
+  composer.run(comp, ctx_from(body))
+  assert receive_event(s) == Ok("matched")
+}
+
+pub fn hears_rejects_substrings_in_text_and_caption_test() {
+  let s: process.Subject(String) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.hears("test", fn(_) { process.send(s, "unexpected") })
+  let text_body =
+    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"a test message\"}}"
+  let caption_body =
+    "{\"update_id\":2,\"message\":{\"message_id\":2,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"caption\":\"a test caption\"}}"
+  composer.run(comp, ctx_from(text_body))
+  composer.run(comp, ctx_from(caption_body))
+  assert no_event(s)
+}
+
+pub fn hears_when_supports_substring_predicate_test() {
+  let s: process.Subject(String) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.hears_when(fn(text) { string.contains(text, "es") }, fn(_) {
+      process.send(s, "matched")
+    })
   composer.run(comp, ctx_from(message_test_body))
-  assert process.receive(s, 50) == Ok("matched")
+  assert receive_event(s) == Ok("matched")
 }
 
 // =====================================================================
@@ -182,10 +216,22 @@ pub fn command_fires_only_for_matching_command_test() {
     comp,
     context.new(message_with_command("/quack", 6), dummy_api()),
   )
-  assert collect_all(s) == ["start", "help"]
+  assert collect_exact(s, 2) == ["start", "help"]
 }
 
-pub fn command_strips_bot_username_test() {
+pub fn command_accepts_caption_bot_command_test() {
+  let s: process.Subject(String) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.command("start", fn(_) { process.send(s, "matched") })
+  composer.run(
+    comp,
+    context.new(message_with_caption_command("/start photo", 6), dummy_api()),
+  )
+  assert receive_event(s) == Ok("matched")
+}
+
+pub fn command_ignores_addressed_command_without_bot_identity_test() {
   let s: process.Subject(String) = process.new_subject()
   let comp =
     composer.new()
@@ -194,7 +240,46 @@ pub fn command_strips_bot_username_test() {
     comp,
     context.new(message_with_command("/start@my_bot", 13), dummy_api()),
   )
-  assert process.receive(s, 50) == Ok("fired")
+  assert no_event(s)
+}
+
+pub fn command_for_bot_accepts_own_or_unaddressed_only_test() {
+  let s: process.Subject(String) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.command_for_bot("start", "@My_Bot", fn(_) {
+      process.send(s, "fired")
+    })
+  composer.run(
+    comp,
+    context.new(message_with_command("/start", 6), dummy_api()),
+  )
+  composer.run(
+    comp,
+    context.new(message_with_command("/start@my_bot", 13), dummy_api()),
+  )
+  composer.run(
+    comp,
+    context.new(message_with_command("/start@other_bot", 16), dummy_api()),
+  )
+  assert collect_exact(s, 2) == ["fired", "fired"]
+}
+
+pub fn command_for_bot_accepts_caption_command_test() {
+  let s: process.Subject(String) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.command_for_bot("start", "my_bot", fn(_) {
+      process.send(s, "fired")
+    })
+  composer.run(
+    comp,
+    context.new(
+      message_with_caption_command("/start@my_bot photo", 13),
+      dummy_api(),
+    ),
+  )
+  assert receive_event(s) == Ok("fired")
 }
 
 pub fn command_any_accepts_alternates_test() {
@@ -216,7 +301,7 @@ pub fn command_any_accepts_alternates_test() {
     comp,
     context.new(message_with_command("/quack", 6), dummy_api()),
   )
-  assert collect_all(s) == ["matched", "matched"]
+  assert collect_exact(s, 2) == ["matched", "matched"]
 }
 
 // =====================================================================
@@ -230,8 +315,8 @@ pub fn callback_query_matches_exact_data_test() {
     |> composer.callback_query("cb", fn(_) { process.send(s, "match") })
     |> composer.callback_query("xxx", fn(_) { process.send(s, "miss") })
   composer.run(comp, ctx_from(callback_body))
-  assert process.receive(s, 50) == Ok("match")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("match")
+  assert no_event(s)
 }
 
 pub fn chat_type_filters_correctly_test() {
@@ -242,7 +327,7 @@ pub fn chat_type_filters_correctly_test() {
     |> composer.chat_type(types.Channel, fn(_) { process.send(s, "channel") })
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(channel_post_body))
-  assert collect_all(s) == ["private", "channel"]
+  assert collect_exact(s, 2) == ["private", "channel"]
 }
 
 // =====================================================================
@@ -264,8 +349,8 @@ pub fn filter_runs_only_when_pred_true_test() {
     )
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(callback_body))
-  assert process.receive(s, 50) == Ok("matched")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("matched")
+  assert no_event(s)
 }
 
 pub fn drop_runs_only_when_pred_false_test() {
@@ -283,8 +368,8 @@ pub fn drop_runs_only_when_pred_false_test() {
     )
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(callback_body))
-  assert process.receive(s, 50) == Ok("not-test")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("not-test")
+  assert no_event(s)
 }
 
 pub fn branch_picks_correct_arm_test() {
@@ -303,7 +388,7 @@ pub fn branch_picks_correct_arm_test() {
     )
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(callback_body))
-  assert collect_all(s) == ["yes-message", "no-message"]
+  assert collect_exact(s, 2) == ["yes-message", "no-message"]
 }
 
 // =====================================================================
@@ -329,8 +414,8 @@ pub fn route_dispatches_on_key_test() {
   composer.run(comp, ctx_from(message_test_body))
   // Unknown routes are silently ignored.
   composer.run(comp, ctx_from(callback_body))
-  assert process.receive(s, 50) == Ok("route-test")
-  assert process.receive(s, 50) == Error(Nil)
+  assert receive_event(s) == Ok("route-test")
+  assert no_event(s)
 }
 
 // =====================================================================
@@ -346,9 +431,50 @@ pub fn fork_spawns_handler_in_background_test() {
   composer.run(comp, ctx_from(message_test_body))
   // The main handler runs immediately; the fork may arrive before or
   // after — we just verify both eventually arrive.
-  let messages = collect_all_eventually(s, 50)
+  let messages = collect_exact(s, 2)
   assert list.contains(messages, "main")
   assert list.contains(messages, "forked")
+}
+
+pub fn fork_abnormal_exit_does_not_kill_dispatch_or_stop_chain_test() {
+  let fork_ready: process.Subject(#(process.Pid, process.Subject(Nil))) =
+    process.new_subject()
+  let main_ready: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let chain: process.Subject(String) = process.new_subject()
+  let dispatch_done: process.Subject(Nil) = process.new_subject()
+  let comp =
+    composer.new()
+    |> composer.fork(fn(_) {
+      let crash_now: process.Subject(Nil) = process.new_subject()
+      process.send(fork_ready, #(process.self(), crash_now))
+      process.receive_forever(crash_now)
+      process.kill(process.self())
+    })
+    |> composer.handle(fn(_) {
+      let resume: process.Subject(Nil) = process.new_subject()
+      process.send(main_ready, resume)
+      process.receive_forever(resume)
+      process.send(chain, "continued")
+    })
+
+  let dispatch =
+    process.spawn_unlinked(fn() {
+      composer.run(comp, ctx_from(message_test_body))
+      process.send(dispatch_done, Nil)
+    })
+  let dispatch_monitor = process.monitor(dispatch)
+  let assert Ok(#(fork_process, crash_now)) = receive_event(fork_ready)
+  let assert Ok(resume) = receive_event(main_ready)
+  let fork_monitor = process.monitor(fork_process)
+
+  process.send(crash_now, Nil)
+  assert monitor_went_down(fork_monitor, helpers.async_timeout_ms)
+  assert !monitor_went_down(dispatch_monitor, helpers.negative_window_ms)
+  process.demonitor_process(dispatch_monitor)
+
+  process.send(resume, Nil)
+  assert receive_event(chain) == Ok("continued")
+  assert receive_event(dispatch_done) == Ok(Nil)
 }
 
 // =====================================================================
@@ -371,7 +497,7 @@ pub fn lazy_calls_factory_on_each_invocation_test() {
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(message_test_body))
   composer.run(comp, ctx_from(message_test_body))
-  assert collect_all(s) == ["n=0", "n=1", "n=2"]
+  assert collect_exact(s, 3) == ["n=0", "n=1", "n=2"]
 }
 
 // =====================================================================
@@ -386,23 +512,29 @@ pub fn chain_runs_handlers_in_order_test() {
     |> composer.handle(fn(_) { process.send(s, "two") })
     |> composer.handle(fn(_) { process.send(s, "three") })
   composer.run(comp, ctx_from(message_test_body))
-  assert collect_all(s) == ["one", "two", "three"]
+  assert collect_exact(s, 3) == ["one", "two", "three"]
 }
 
 // =====================================================================
 //                              helpers
 // =====================================================================
 
-fn collect_all(s: process.Subject(String)) -> List(String) {
-  case process.receive(s, 50) |> result.map_error(fn(_) { Nil }) {
-    Ok(v) -> [v, ..collect_all(s)]
-    Error(_) -> []
+fn collect_exact(s: process.Subject(String), remaining: Int) -> List(String) {
+  case remaining <= 0 {
+    True -> []
+    False -> {
+      let assert Ok(value) = receive_event(s)
+      [value, ..collect_exact(s, remaining - 1)]
+    }
   }
 }
 
-fn collect_all_eventually(s: process.Subject(String), ms: Int) -> List(String) {
-  case process.receive(s, ms) {
-    Ok(v) -> [v, ..collect_all_eventually(s, ms)]
-    Error(_) -> []
+fn monitor_went_down(monitor: process.Monitor, within_ms: Int) -> Bool {
+  let selector =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, ObservedExit)
+  case process.selector_receive(selector, within_ms) {
+    Ok(ObservedExit(_)) -> True
+    Error(_) -> False
   }
 }

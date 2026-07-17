@@ -7,18 +7,175 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  python_guards:
+    name: Python release guards / offline fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          otp-version: "28"
+          persist-credentials: false
+      - name: Test deterministic release guards
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+  minimum_dependencies:
+    name: Minimum dependencies / Gleam 1.16.0 / OTP 27
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: "27"
           gleam-version: "1.16.0"
           rebar3-version: "3"
-          # elixir-version: "1"
-      - run: gleam deps download
-      - run: gleam test
-      - run: gleam docs build
-      - run: gleam format --check src test
+      - name: Resolve and test declared dependency floors
+        run: ./scripts/check_min_deps.sh
+
+  test:
+    name: Gleam ${{ matrix.gleam }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gleam: "1.17.0"
+            otp: "28"
+            release_gate: false
+          - gleam: "1.17.0"
+            otp: "29"
+            release_gate: true
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ matrix.otp }}
+          gleam-version: ${{ matrix.gleam }}
+          rebar3-version: "3"
+      - name: Download dependencies
+        run: gleam deps download
+      - name: Verify root lockfile is current
+        run: |
+          git ls-files --error-unmatch manifest.toml
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all -- manifest.toml)" ]; then
+            git status --short -- manifest.toml
+            exit 1
+          fi
+      - name: Check patch whitespace
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --check "$PR_BASE_SHA...HEAD"
+          elif git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then
+            git diff --check "$PUSH_BEFORE_SHA..HEAD"
+          else
+            git diff --check "$(git hash-object -t tree /dev/null)..HEAD"
+          fi
+      - name: Build with warnings as errors
+        run: gleam build --warnings-as-errors
+      - name: Test
+        run: gleam test
+      - name: Build documentation
+        run: gleam docs build
+      - name: Check formatting
+        run: gleam format --check src test examples/echo_bot/src
+      - name: Download consumer dependencies
+        if: matrix.release_gate
+        working-directory: examples/echo_bot
+        run: gleam deps download
+      - name: Verify consumer lockfile is current
+        if: matrix.release_gate
+        working-directory: examples/echo_bot
+        run: |
+          git ls-files --error-unmatch manifest.toml
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all -- manifest.toml)" ]; then
+            git status --short -- manifest.toml
+            exit 1
+          fi
+      - name: Build consumer example
+        if: matrix.release_gate
+        working-directory: examples/echo_bot
+        run: gleam build --warnings-as-errors
+      - name: Export Hex package
+        if: matrix.release_gate
+        run: gleam export hex-tarball
+      - name: Inspect Hex package contents
+        if: matrix.release_gate
+        run: ./scripts/verify_hex_tarball.sh
+      - name: Prove Hex verifier fails closed
+        if: matrix.release_gate
+        run: |
+          set -- build/glammy-*.tar
+          test "$#" -eq 1
+          GLAMMY_HEX_ARCHIVE=$1 python3 scripts/tests/test_verify_hex_tarball.py
+      - name: Prove repeated Hex export equivalence
+        if: matrix.release_gate
+        run: |
+          cp build/glammy-*.tar "$RUNNER_TEMP/glammy-first-export.tar"
+          gleam export hex-tarball
+          ./scripts/compare_hex_artifacts.sh \
+            "$RUNNER_TEMP/glammy-first-export.tar" \
+            build/glammy-*.tar
+      - name: Build against unpacked Hex package
+        if: matrix.release_gate
+        run: ./scripts/build_hex_consumer.sh
+      - name: Record verified Hex artifact provenance
+        if: matrix.release_gate
+        env:
+          EXPECTED_GLEAM: ${{ matrix.gleam }}
+          EXPECTED_OTP: ${{ matrix.otp }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(gleam --version)" = "gleam $EXPECTED_GLEAM"
+          otp_release=$(erl -noshell -eval \
+            'io:format("~s", [erlang:system_info(otp_release)]), halt().')
+          test "$otp_release" = "$EXPECTED_OTP"
+
+          set -- build/glammy-*.tar
+          test "$#" -eq 1
+          archive=$1
+          destination="$RUNNER_TEMP/glammy-release-artifact"
+          mkdir -p "$destination"
+          cp "$archive" "$destination/$(basename "$archive")"
+          cd "$destination"
+          sha256sum "$(basename "$archive")" > SHA256SUMS
+          artifact_sha=$(awk '{ print $1 }' SHA256SUMS)
+          {
+            printf '%s\n' "schema=glammy-release-provenance-v1"
+            printf '%s\n' "repository=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            printf '%s\n' "commit=$GITHUB_SHA"
+            printf '%s\n' "tree=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD^{tree})"
+            printf '%s\n' "ref=$GITHUB_REF"
+            printf '%s\n' "event=$GITHUB_EVENT_NAME"
+            printf '%s\n' "gleam=gleam $EXPECTED_GLEAM"
+            printf '%s\n' "otp=$EXPECTED_OTP"
+            printf '%s\n' "artifact=$(basename "$archive")"
+            printf '%s\n' "sha256=$artifact_sha"
+          } > PROVENANCE.txt
+      - name: Upload verified Hex artifact and provenance
+        if: matrix.release_gate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: glammy-hex-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/glammy-release-artifact
+          if-no-files-found: error
+          retention-days: 30

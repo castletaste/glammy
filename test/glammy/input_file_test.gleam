@@ -7,11 +7,6 @@
 import glammy/input_file
 import gleam/option.{None, Some}
 
-pub fn filename_from_path_test() {
-  assert input_file.infer_filename(input_file.from_path("/tmp/file.txt"))
-    == Some("file.txt")
-}
-
 pub fn filename_from_url_with_path_test() {
   assert input_file.infer_filename(input_file.from_url(
       "https://grammy.dev/file.txt",
@@ -32,10 +27,6 @@ pub fn from_bytes_preserves_filename_test() {
   let file = input_file.from_bytes(<<65, 66, 67>>, "AB.bin")
   assert input_file.infer_filename(file) == Some("AB.bin")
   assert input_file.requires_upload(file) == True
-}
-
-pub fn from_path_requires_upload_test() {
-  assert input_file.requires_upload(input_file.from_path("/tmp/x")) == True
 }
 
 pub fn file_id_and_url_do_not_require_upload_test() {
@@ -59,4 +50,34 @@ pub fn payload_value_for_url_test() {
 pub fn payload_value_for_bytes_uses_attach_scheme_test() {
   let file = input_file.from_bytes(<<1, 2, 3>>, "x.bin")
   assert input_file.to_payload_value(file, "photo") == "attach://photo"
+}
+
+pub fn url_free_sources_convert_to_general_input_files_test() {
+  let assert Ok(file_id) = input_file.file_id_source(" video-note-id ")
+  assert input_file.file_id_or_upload_to_input_file(file_id)
+    == input_file.FileId("video-note-id")
+  let upload = input_file.upload_source(<<1, 2>>, "note.mp4", Some("video/mp4"))
+  assert input_file.file_id_or_upload_to_input_file(upload)
+    == input_file.FileBytes(<<1, 2>>, "note.mp4", Some("video/mp4"))
+}
+
+pub fn url_free_file_id_source_rejects_invalid_values_test() {
+  assert input_file.file_id_source("") == Error(input_file.EmptyFileIdSource)
+  assert input_file.file_id_source("   ") == Error(input_file.EmptyFileIdSource)
+  assert input_file.file_id_source("https://example.com/note.mp4")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("HTTP://example.com/note.mp4")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("file://note.mp4")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("data:video/mp4;base64,AAAA")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("mailto:bot@example.com")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("custom+transport:note")
+    == Error(input_file.RemoteUrlSourceNotAllowed)
+  assert input_file.file_id_source("attach://video_note")
+    == Error(input_file.AttachmentSourceNotAllowed)
+  assert input_file.file_id_source("ATTACH:video_note")
+    == Error(input_file.AttachmentSourceNotAllowed)
 }

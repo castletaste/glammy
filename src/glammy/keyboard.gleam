@@ -2,8 +2,10 @@
 //// `convenience/keyboard.ts`. Two flavours are exposed:
 ////
 //// - `InlineKeyboard` — attached to a message, with callback / URL /
-////   web-app / login / switch-inline / game / pay buttons. Renders into
-////   Telegram's `InlineKeyboardMarkup` JSON.
+////   web-app / login / switch-inline buttons. Renders into Telegram's
+////   `InlineKeyboardMarkup` JSON.
+//// - `GameInlineKeyboard` / `InvoiceInlineKeyboard` — endpoint-specific
+////   wrappers that keep the required game / pay button first in the first row.
 //// - `ReplyKeyboard` — the custom keyboard that replaces the user's
 ////   normal one. Supports text / contact / location / poll / web-app /
 ////   request_users / request_chat buttons. Renders into
@@ -12,7 +14,9 @@
 //// Both are built up row-by-row using a pipe-friendly builder pattern,
 //// and both support `transpose`, `flow`, and `append` post-processors.
 
-import glammy/internal/json_utils.{put_optional}
+import glammy/https_url.{type HttpsUrl}
+import glammy/internal/json_utils
+import glammy/types.{type InputPollKind}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -21,29 +25,29 @@ import gleam/option.{type Option, None, Some}
 //                           InlineKeyboard
 // =====================================================================
 
+/// One action button in an inline keyboard row.
 pub type InlineKeyboardButton {
   InlineUrl(text: String, url: String)
   InlineCallback(text: String, callback_data: String)
-  InlineWebApp(text: String, url: String)
+  InlineWebApp(text: String, url: HttpsUrl)
   InlineLoginUrl(text: String, login_url: LoginUrl)
   InlineSwitchInline(text: String, query: String)
   InlineSwitchInlineCurrent(text: String, query: String)
   InlineSwitchInlineChosen(text: String, options: SwitchInlineChosenChat)
-  InlineGame(text: String)
-  InlinePay(text: String)
 }
 
+/// Authentication options attached to an inline login button.
 pub type LoginUrl {
   LoginUrl(
-    url: String,
+    url: HttpsUrl,
     forward_text: Option(String),
     bot_username: Option(String),
     request_write_access: Option(Bool),
   )
 }
 
-/// Create `LoginUrl` options for an inline login button.
-pub fn login_url(url: String) -> LoginUrl {
+/// Create `LoginUrl` options with a validated HTTPS target.
+pub fn login_url(url: HttpsUrl) -> LoginUrl {
   LoginUrl(
     url:,
     forward_text: None,
@@ -52,6 +56,7 @@ pub fn login_url(url: String) -> LoginUrl {
   )
 }
 
+/// Chat-kind constraints for `switch_inline_query_chosen_chat`.
 pub type SwitchInlineChosenChat {
   SwitchInlineChosenChat(
     query: Option(String),
@@ -73,6 +78,7 @@ pub fn switch_inline_chosen_chat() -> SwitchInlineChosenChat {
   )
 }
 
+/// An immutable inline keyboard built row by row.
 pub opaque type InlineKeyboard {
   /// Rows are stored in reverse order — newest first — so appending is
   /// cheap. We reverse on render.
@@ -107,11 +113,11 @@ pub fn inline_url(
   add_inline_button(keyboard, InlineUrl(text:, url:))
 }
 
-/// Append an inline web-app button.
+/// Append an inline web-app button with a validated HTTPS target.
 pub fn inline_web_app(
   keyboard: InlineKeyboard,
   text: String,
-  url: String,
+  url: HttpsUrl,
 ) -> InlineKeyboard {
   add_inline_button(keyboard, InlineWebApp(text:, url:))
 }
@@ -150,16 +156,6 @@ pub fn inline_switch_inline_chosen(
   options: SwitchInlineChosenChat,
 ) -> InlineKeyboard {
   add_inline_button(keyboard, InlineSwitchInlineChosen(text:, options:))
-}
-
-/// Append an inline game button.
-pub fn inline_game(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
-  add_inline_button(keyboard, InlineGame(text:))
-}
-
-/// Append an inline pay button.
-pub fn inline_pay(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
-  add_inline_button(keyboard, InlinePay(text:))
 }
 
 /// Start a new row. The next `inline_*` call adds a button to the new row.
@@ -236,7 +232,10 @@ fn inline_button_to_json(button: InlineKeyboardButton) -> json.Json {
     InlineWebApp(text:, url:) ->
       json.object([
         #("text", json.string(text)),
-        #("web_app", json.object([#("url", json.string(url))])),
+        #(
+          "web_app",
+          json.object([#("url", json.string(https_url.to_string(url)))]),
+        ),
       ])
     InlineLoginUrl(text:, login_url:) ->
       json.object([
@@ -261,33 +260,142 @@ fn inline_button_to_json(button: InlineKeyboardButton) -> json.Json {
           switch_inline_chosen_chat_to_json(options),
         ),
       ])
-    InlineGame(text:) ->
+  }
+}
+
+// =====================================================================
+//                   Endpoint-specific inline keyboards
+// =====================================================================
+
+/// An inline keyboard accepted by `sendGame`.
+///
+/// Telegram requires the callback-game button to be the first button in the
+/// first row. The constructor is private so normal keyboard operations cannot
+/// move it away from that position.
+pub opaque type GameInlineKeyboard {
+  GameInlineKeyboard(text: String, trailing: InlineKeyboard)
+}
+
+/// Build a game keyboard containing only the required callback-game button.
+pub fn game_inline_keyboard(text: String) -> GameInlineKeyboard {
+  game_inline_keyboard_with(text, inline())
+}
+
+/// Prefix a normal inline keyboard with the required callback-game button.
+///
+/// The supplied keyboard is kept as trailing rows, so transpose, flow, and
+/// append operations performed before wrapping cannot break the game-button
+/// position invariant.
+pub fn game_inline_keyboard_with(
+  text: String,
+  trailing: InlineKeyboard,
+) -> GameInlineKeyboard {
+  GameInlineKeyboard(text:, trailing:)
+}
+
+/// Encode a game-specific inline keyboard for the Bot API.
+pub fn game_inline_keyboard_to_json(keyboard: GameInlineKeyboard) -> json.Json {
+  endpoint_inline_to_json(
+    special_row: json.array([keyboard.text], fn(text) {
       json.object([
         #("text", json.string(text)),
         #("callback_game", json.object([])),
       ])
-    InlinePay(text:) ->
-      json.object([#("text", json.string(text)), #("pay", json.bool(True))])
-  }
+    }),
+    trailing: keyboard.trailing,
+  )
+}
+
+/// An inline keyboard accepted by `sendInvoice`.
+///
+/// Telegram requires the pay button to be the first button in the first row.
+/// The constructor is private so normal keyboard operations cannot move it
+/// away from that position.
+pub opaque type InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(text: String, trailing: InlineKeyboard)
+}
+
+/// Build an invoice keyboard containing only the required pay button.
+pub fn invoice_inline_keyboard(text: String) -> InvoiceInlineKeyboard {
+  invoice_inline_keyboard_with(text, inline())
+}
+
+/// Prefix a normal inline keyboard with the required pay button.
+///
+/// The supplied keyboard is kept as trailing rows, so transpose, flow, and
+/// append operations performed before wrapping cannot break the pay-button
+/// position invariant.
+pub fn invoice_inline_keyboard_with(
+  text: String,
+  trailing: InlineKeyboard,
+) -> InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(text:, trailing:)
+}
+
+/// Encode an invoice-specific inline keyboard for the Bot API.
+pub fn invoice_inline_keyboard_to_json(
+  keyboard: InvoiceInlineKeyboard,
+) -> json.Json {
+  endpoint_inline_to_json(
+    special_row: json.array([keyboard.text], fn(text) {
+      json.object([
+        #("text", json.string(text)),
+        #("pay", json.bool(True)),
+      ])
+    }),
+    trailing: keyboard.trailing,
+  )
+}
+
+fn endpoint_inline_to_json(
+  special_row special_row: json.Json,
+  trailing trailing: InlineKeyboard,
+) -> json.Json {
+  let trailing_rows =
+    trailing
+    |> inline_rows
+    |> list.map(fn(row) { json.array(row, inline_button_to_json) })
+  json.object([
+    #(
+      "inline_keyboard",
+      json.array([special_row, ..trailing_rows], fn(row) { row }),
+    ),
+  ])
 }
 
 fn login_url_to_json(url: LoginUrl) -> json.Json {
   json.object(
-    [#("url", json.string(url.url))]
-    |> put_optional("forward_text", url.forward_text, json.string)
-    |> put_optional("bot_username", url.bot_username, json.string)
-    |> put_optional("request_write_access", url.request_write_access, json.bool),
+    [#("url", json.string(https_url.to_string(url.url)))]
+    |> json_utils.put_optional("forward_text", url.forward_text, json.string)
+    |> json_utils.put_optional("bot_username", url.bot_username, json.string)
+    |> json_utils.put_optional(
+      "request_write_access",
+      url.request_write_access,
+      json.bool,
+    ),
   )
 }
 
 fn switch_inline_chosen_chat_to_json(o: SwitchInlineChosenChat) -> json.Json {
   json.object(
     []
-    |> put_optional("query", o.query, json.string)
-    |> put_optional("allow_user_chats", o.allow_user_chats, json.bool)
-    |> put_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
-    |> put_optional("allow_group_chats", o.allow_group_chats, json.bool)
-    |> put_optional("allow_channel_chats", o.allow_channel_chats, json.bool),
+    |> json_utils.put_optional("query", o.query, json.string)
+    |> json_utils.put_optional(
+      "allow_user_chats",
+      o.allow_user_chats,
+      json.bool,
+    )
+    |> json_utils.put_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
+    |> json_utils.put_optional(
+      "allow_group_chats",
+      o.allow_group_chats,
+      json.bool,
+    )
+    |> json_utils.put_optional(
+      "allow_channel_chats",
+      o.allow_channel_chats,
+      json.bool,
+    ),
   )
 }
 
@@ -295,17 +403,19 @@ fn switch_inline_chosen_chat_to_json(o: SwitchInlineChosenChat) -> json.Json {
 //                           ReplyKeyboard
 // =====================================================================
 
+/// One button in a custom reply keyboard row.
 pub type ReplyKeyboardButton {
   ReplyText(text: String)
   ReplyRequestContact(text: String)
   ReplyRequestLocation(text: String)
-  ReplyRequestPoll(text: String, type_: Option(String))
-  ReplyWebApp(text: String, url: String)
+  ReplyRequestPoll(text: String, type_: Option(InputPollKind))
+  ReplyWebApp(text: String, url: HttpsUrl)
   ReplyRequestUsers(text: String, request_id: Int, user_is_bot: Option(Bool))
   ReplyRequestChat(text: String, request_id: Int, chat_is_channel: Bool)
   ReplyRequestManagedBot(text: String, request_id: Int)
 }
 
+/// An immutable custom reply keyboard and its display options.
 pub opaque type ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: List(List(ReplyKeyboardButton)),
@@ -366,16 +476,16 @@ pub fn reply_request_location(
 pub fn reply_request_poll(
   keyboard: ReplyKeyboard,
   text: String,
-  type_ type_: Option(String),
+  type_ type_: Option(InputPollKind),
 ) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyRequestPoll(text:, type_:))
 }
 
-/// Append a reply web-app button.
+/// Append a reply web-app button with a validated HTTPS target.
 pub fn reply_web_app(
   keyboard: ReplyKeyboard,
   text: String,
-  url: String,
+  url: HttpsUrl,
 ) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyWebApp(text:, url:))
 }
@@ -506,11 +616,19 @@ pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
   ]
   let with_extras =
     base
-    |> put_optional("resize_keyboard", keyboard.resize, json.bool)
-    |> put_optional("one_time_keyboard", keyboard.one_time, json.bool)
-    |> put_optional("selective", keyboard.selective, json.bool)
-    |> put_optional("is_persistent", keyboard.is_persistent, json.bool)
-    |> put_optional(
+    |> json_utils.put_optional("resize_keyboard", keyboard.resize, json.bool)
+    |> json_utils.put_optional(
+      "one_time_keyboard",
+      keyboard.one_time,
+      json.bool,
+    )
+    |> json_utils.put_optional("selective", keyboard.selective, json.bool)
+    |> json_utils.put_optional(
+      "is_persistent",
+      keyboard.is_persistent,
+      json.bool,
+    )
+    |> json_utils.put_optional(
       "input_field_placeholder",
       keyboard.input_field_placeholder,
       json.string,
@@ -537,7 +655,9 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
         #(
           "request_poll",
           json.object(case type_ {
-            Some(t) -> [#("type", json.string(t))]
+            Some(t) -> [
+              #("type", json.string(types.input_poll_kind_to_string(t))),
+            ]
             None -> []
           }),
         ),
@@ -545,7 +665,10 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
     ReplyWebApp(text:, url:) ->
       json.object([
         #("text", json.string(text)),
-        #("web_app", json.object([#("url", json.string(url))])),
+        #(
+          "web_app",
+          json.object([#("url", json.string(https_url.to_string(url)))]),
+        ),
       ])
     ReplyRequestUsers(text:, request_id:, user_is_bot:) ->
       json.object([
@@ -554,7 +677,7 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
           "request_users",
           json.object(
             [#("request_id", json.int(request_id))]
-            |> put_optional("user_is_bot", user_is_bot, json.bool),
+            |> json_utils.put_optional("user_is_bot", user_is_bot, json.bool),
           ),
         ),
       ])
@@ -584,14 +707,72 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
 //                        Markup helpers
 // =====================================================================
 
-/// Build Telegram `ReplyKeyboardRemove` JSON.
-pub fn remove_keyboard() -> json.Json {
-  json.object([#("remove_keyboard", json.bool(True))])
+/// Telegram's four reply-markup shapes accepted by message-send methods.
+pub type ReplyMarkup {
+  /// An inline keyboard attached below a message.
+  InlineKeyboardMarkup(InlineKeyboard)
+  /// A custom reply keyboard replacing the user's system keyboard.
+  ReplyKeyboardMarkup(ReplyKeyboard)
+  /// Remove a previously displayed custom reply keyboard.
+  ReplyKeyboardRemove(selective: Option(Bool))
+  /// Ask the client to open its reply UI for the message.
+  ForceReply(input_field_placeholder: Option(String), selective: Option(Bool))
 }
 
-/// Build Telegram `ForceReply` JSON.
-pub fn force_reply() -> json.Json {
-  json.object([#("force_reply", json.bool(True))])
+/// Attach an inline keyboard as typed reply markup.
+pub fn inline_markup(keyboard: InlineKeyboard) -> ReplyMarkup {
+  InlineKeyboardMarkup(keyboard)
+}
+
+/// Attach a custom reply keyboard as typed reply markup.
+pub fn reply_markup(keyboard: ReplyKeyboard) -> ReplyMarkup {
+  ReplyKeyboardMarkup(keyboard)
+}
+
+/// Remove the current custom reply keyboard.
+pub fn remove_keyboard() -> ReplyMarkup {
+  ReplyKeyboardRemove(selective: None)
+}
+
+/// Remove the keyboard only for selected users.
+pub fn remove_keyboard_selective(selective: Bool) -> ReplyMarkup {
+  ReplyKeyboardRemove(selective: Some(selective))
+}
+
+/// Force the user to reply without extra options.
+pub fn force_reply() -> ReplyMarkup {
+  ForceReply(input_field_placeholder: None, selective: None)
+}
+
+/// Force a reply with explicit placeholder and selection behaviour.
+pub fn force_reply_with(
+  input_field_placeholder: Option(String),
+  selective: Option(Bool),
+) -> ReplyMarkup {
+  ForceReply(input_field_placeholder:, selective:)
+}
+
+/// Encode typed reply markup for the Bot API.
+pub fn reply_markup_to_json(markup: ReplyMarkup) -> json.Json {
+  case markup {
+    InlineKeyboardMarkup(keyboard) -> inline_to_json(keyboard)
+    ReplyKeyboardMarkup(keyboard) -> reply_to_json(keyboard)
+    ReplyKeyboardRemove(selective:) ->
+      json.object(
+        [#("remove_keyboard", json.bool(True))]
+        |> json_utils.put_optional("selective", selective, json.bool),
+      )
+    ForceReply(input_field_placeholder:, selective:) ->
+      json.object(
+        [#("force_reply", json.bool(True))]
+        |> json_utils.put_optional(
+          "input_field_placeholder",
+          input_field_placeholder,
+          json.string,
+        )
+        |> json_utils.put_optional("selective", selective, json.bool),
+      )
+  }
 }
 
 // =====================================================================

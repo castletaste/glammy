@@ -5,8 +5,42 @@
 import glammy/api
 import glammy/context
 import glammy/types.{type Update}
+import gleam/erlang/process
 import gleam/int
 import gleam/json
+
+/// Generous deadline for events that a successful async test must observe.
+pub const async_timeout_ms = 1000
+
+/// Deliberately short observation window for assertions that no event occurs.
+pub const negative_window_ms = 25
+
+/// Waits for an event that is required for the test to succeed.
+pub fn receive_event(
+  subject: process.Subject(message),
+) -> Result(message, Nil) {
+  process.receive(subject, async_timeout_ms)
+}
+
+/// Observes the mailbox briefly and succeeds only when no event arrives.
+pub fn no_event(subject: process.Subject(message)) -> Bool {
+  case process.receive(subject, negative_window_ms) {
+    Ok(_) -> False
+    Error(_) -> True
+  }
+}
+
+/// Receives an exact number of required events using the shared async deadline.
+pub fn receive_n(subject: process.Subject(message), remaining: Int) -> Bool {
+  case remaining <= 0 {
+    True -> True
+    False ->
+      case receive_event(subject) {
+        Ok(_) -> receive_n(subject, remaining - 1)
+        Error(_) -> False
+      }
+  }
+}
 
 /// A dummy `Api` pointed at a fake token, used wherever a test needs an
 /// `Api` value but never actually issues a network call.

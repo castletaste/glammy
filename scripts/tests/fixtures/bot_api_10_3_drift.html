@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <h3>Recent changes</h3>
+    <h4>August 2, 2026</h4>
+    <p>Bot API 10.3</p>
+
+    <h3>Getting updates</h3>
+    <h4>Update</h4>
+    <table>
+      <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+      <tr><td>update_id</td><td>String</td><td>Unique identifier.</td></tr>
+      <tr><td>message</td><td>Message</td><td>New incoming message.</td></tr>
+      <tr><td>new_update</td><td>NewType</td><td><em>Optional</em>. New update.</td></tr>
+    </table>
+
+    <h4>getUpdates</h4>
+    <table>
+      <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+      <tr><td>offset</td><td>String</td><td>Yes</td><td>First update.</td></tr>
+      <tr><td>limit</td><td>Integer</td><td>Optional</td><td>Maximum count.</td></tr>
+    </table>
+
+    <h4>sendNovelThing</h4>
+    <p>Use this method to send a novel thing.</p>
+
+    <h3>Available types</h3>
+    <h4>Message</h4>
+    <table>
+      <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+      <tr><td>message_id</td><td>Integer</td><td>Unique message identifier.</td></tr>
+      <tr><td>novel</td><td>Boolean</td><td><em>Optional</em>. Novel marker.</td></tr>
+    </table>
+
+    <h4>NewType</h4>
+    <table>
+      <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+      <tr><td>value</td><td>String</td><td>Value.</td></tr>
+    </table>
+  </body>
+</html>

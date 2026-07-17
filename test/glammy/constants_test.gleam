@@ -2,26 +2,38 @@
 //// TypeScript original uses type-level exhaustiveness assertions; here
 //// we sanity-check the value-level constants instead.
 
+import glammy/chat_action
 import glammy/constants
+import glammy/parse_mode
 
 pub fn parse_modes_have_expected_values_test() {
-  assert constants.parse_mode_markdown == "Markdown"
-  assert constants.parse_mode_markdown_v2 == "MarkdownV2"
-  assert constants.parse_mode_html == "HTML"
+  assert parse_mode.to_string(constants.parse_mode_markdown) == "Markdown"
+  assert parse_mode.to_string(constants.parse_mode_markdown_v2) == "MarkdownV2"
+  assert parse_mode.to_string(constants.parse_mode_html) == "HTML"
 }
 
 pub fn chat_actions_have_expected_values_test() {
-  assert constants.chat_action_typing == "typing"
-  assert constants.chat_action_upload_photo == "upload_photo"
-  assert constants.chat_action_record_video == "record_video"
-  assert constants.chat_action_upload_video == "upload_video"
-  assert constants.chat_action_record_voice == "record_voice"
-  assert constants.chat_action_upload_voice == "upload_voice"
-  assert constants.chat_action_upload_document == "upload_document"
-  assert constants.chat_action_choose_sticker == "choose_sticker"
-  assert constants.chat_action_find_location == "find_location"
-  assert constants.chat_action_record_video_note == "record_video_note"
-  assert constants.chat_action_upload_video_note == "upload_video_note"
+  assert chat_action.to_string(constants.chat_action_typing) == "typing"
+  assert chat_action.to_string(constants.chat_action_upload_photo)
+    == "upload_photo"
+  assert chat_action.to_string(constants.chat_action_record_video)
+    == "record_video"
+  assert chat_action.to_string(constants.chat_action_upload_video)
+    == "upload_video"
+  assert chat_action.to_string(constants.chat_action_record_voice)
+    == "record_voice"
+  assert chat_action.to_string(constants.chat_action_upload_voice)
+    == "upload_voice"
+  assert chat_action.to_string(constants.chat_action_upload_document)
+    == "upload_document"
+  assert chat_action.to_string(constants.chat_action_choose_sticker)
+    == "choose_sticker"
+  assert chat_action.to_string(constants.chat_action_find_location)
+    == "find_location"
+  assert chat_action.to_string(constants.chat_action_record_video_note)
+    == "record_video_note"
+  assert chat_action.to_string(constants.chat_action_upload_video_note)
+    == "upload_video_note"
 }
 
 pub fn sticker_types_have_expected_values_test() {

@@ -7,18 +7,21 @@
 
 import glammy/context.{type Context}
 import glammy/filter.{type Filter, type Query}
-import glammy/types.{type Message, MessageEntity}
+import glammy/types.{type Message, type MessageEntity, MessageEntity}
 import gleam/erlang/process
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
+/// Continue with the next middleware in the composed pipeline.
 pub type Next =
   fn() -> Nil
 
+/// One immutable composer pipeline step.
 pub type Middleware =
   fn(Context, Next) -> Nil
 
+/// An immutable, ordered middleware pipeline.
 pub opaque type Composer {
   Composer(stack: List(Middleware))
 }
@@ -122,12 +125,14 @@ pub fn route(
   })
 }
 
-/// Run a handler in a separate BEAM process, then immediately move on
-/// to the next middleware in the chain. Useful for fire-and-forget
-/// side-effects that shouldn't block update dispatch.
+/// Run a handler in a separate, unlinked BEAM process, then immediately move
+/// on to the next middleware in the chain. Failures in the fire-and-forget
+/// handler cannot take down update dispatch. This primitive is unbounded and
+/// provides no backpressure, completion observation, or per-key ordering. Use
+/// `glammy/keyed_executor` for bounded production work.
 pub fn fork(composer: Composer, handler: fn(Context) -> Nil) -> Composer {
   use_middleware(composer, fn(ctx, next) {
-    let _ = process.spawn(fn() { handler(ctx) })
+    let _ = process.spawn_unlinked(fn() { handler(ctx) })
     next()
   })
 }
@@ -154,8 +159,13 @@ pub fn append(parent: Composer, child: Composer) -> Composer {
 //                        Command / hears / specifics
 // =====================================================================
 
-/// Append a handler for `/<command>` (and `/<command>@<bot_username>`).
-/// Mirrors grammY's `bot.command(name, handler)`.
+/// Append a handler for an unaddressed `/<command>` found in message text or a
+/// media caption's leading `bot_command` entity. Text takes precedence when a
+/// message contains both.
+///
+/// Addressed commands require the current bot username and are handled by
+/// `command_for_bot`; accepting every `@username` would route commands meant
+/// for another bot.
 pub fn command(
   composer: Composer,
   name: String,
@@ -165,7 +175,7 @@ pub fn command(
     composer,
     fn(ctx) {
       case extract_command(ctx) {
-        Some(cmd) if cmd == name -> True
+        Some(ParsedCommand(command_name, None)) if command_name == name -> True
         _ -> False
       }
     },
@@ -173,7 +183,37 @@ pub fn command(
   )
 }
 
-/// Like `command` but accepts a list of accepted names (OR).
+/// Append a handler for `/<command>` and
+/// `/<command>@<this_bot_username>` in message text or a media caption,
+/// rejecting commands addressed to another bot. Text takes precedence when
+/// both are present. `bot_username` may be passed with or without the leading
+/// `@`.
+pub fn command_for_bot(
+  composer: Composer,
+  name: String,
+  bot_username: String,
+  handler: fn(Context) -> Nil,
+) -> Composer {
+  let expected_bot = normalize_bot_username(bot_username)
+  when(
+    composer,
+    fn(ctx) {
+      case extract_command(ctx) {
+        Some(ParsedCommand(command_name, target)) if command_name == name ->
+          case target {
+            None -> True
+            Some(actual_bot) ->
+              string.lowercase(actual_bot) == string.lowercase(expected_bot)
+          }
+        _ -> False
+      }
+    },
+    handler,
+  )
+}
+
+/// Like `command` but accepts a list of accepted names (OR), including commands
+/// carried by media captions.
 pub fn command_any(
   composer: Composer,
   names: List(String),
@@ -183,28 +223,30 @@ pub fn command_any(
     composer,
     fn(ctx) {
       case extract_command(ctx) {
-        Some(cmd) -> list.contains(names, cmd)
-        None -> False
+        Some(ParsedCommand(command_name, None)) ->
+          list.contains(names, command_name)
+        _ -> False
       }
     },
     handler,
   )
 }
 
-/// Append a handler that fires when the message text *contains* the
-/// given substring. Mirrors grammY's `bot.hears` — substring form only.
-/// For regex matching, use `hears_when`.
+/// Append a handler that fires when the message text or media caption exactly
+/// equals the given string. Text takes precedence when both are present.
+/// For substring, regex, or fuzzy matching, use `hears_when`.
 pub fn hears(
   composer: Composer,
   needle: String,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  when(composer, text_pred(string.contains(_, needle)), handler)
+  when(composer, text_pred(fn(text) { text == needle }), handler)
 }
 
-/// Append a handler that fires when the message text passes the
-/// caller-supplied predicate. Use this for regex / fuzzy matching:
-/// implement the matching yourself and return Bool.
+/// Append a handler that fires when the message text or media caption passes
+/// the caller-supplied predicate. Text takes precedence when both are present.
+/// Use this for regex / fuzzy matching: implement the matching yourself and
+/// return Bool.
 pub fn hears_when(
   composer: Composer,
   pred: fn(String) -> Bool,
@@ -282,41 +324,69 @@ fn when(
   })
 }
 
-/// Build a `Context` predicate from a `String` predicate, evaluated
-/// against the update's message text. `False` when there is no
-/// message text to test.
+/// Build a `Context` predicate from a `String` predicate, evaluated against the
+/// update's message text or media caption.
 fn text_pred(check: fn(String) -> Bool) -> fn(Context) -> Bool {
   fn(ctx) {
-    case context.message_text(ctx) {
-      Some(text) -> check(text)
+    case context.message(ctx) {
+      Some(message) ->
+        case message_text_and_entities(message) {
+          Some(#(text, _)) -> check(text)
+          None -> False
+        }
       None -> False
     }
   }
 }
 
-fn extract_command(ctx: Context) -> option.Option(String) {
+type ParsedCommand {
+  ParsedCommand(name: String, target: option.Option(String))
+}
+
+fn extract_command(ctx: Context) -> option.Option(ParsedCommand) {
   case context.message(ctx) {
     Some(m) -> command_from_message(m)
     None -> None
   }
 }
 
-fn command_from_message(message: Message) -> option.Option(String) {
-  case message.text, message.entities {
-    Some(text),
-      [MessageEntity(type_: "bot_command", offset: 0, length: len, ..), ..]
-    -> {
+fn command_from_message(message: Message) -> option.Option(ParsedCommand) {
+  case message_text_and_entities(message) {
+    Some(#(
+      text,
+      [MessageEntity(type_: "bot_command", offset: 0, length: len, ..), ..],
+    )) -> {
       let raw = string.slice(text, 0, len)
       let without_slash = case string.starts_with(raw, "/") {
         True -> string.drop_start(raw, 1)
         False -> raw
       }
-      let bare = case string.split_once(without_slash, "@") {
-        Ok(#(cmd, _bot)) -> cmd
-        Error(_) -> without_slash
+      let #(command_name, target) = case string.split_once(without_slash, "@") {
+        Ok(#(command_name, target)) -> #(command_name, Some(target))
+        Error(_) -> #(without_slash, None)
       }
-      Some(bare)
+      Some(ParsedCommand(name: command_name, target:))
     }
-    _, _ -> None
+    _ -> None
+  }
+}
+
+fn message_text_and_entities(
+  message: Message,
+) -> option.Option(#(String, List(MessageEntity))) {
+  case message.text {
+    Some(text) -> Some(#(text, message.entities))
+    None ->
+      case message.caption {
+        Some(caption) -> Some(#(caption, message.caption_entities))
+        None -> None
+      }
+  }
+}
+
+fn normalize_bot_username(username: String) -> String {
+  case string.starts_with(username, "@") {
+    True -> string.drop_start(username, 1)
+    False -> username
   }
 }

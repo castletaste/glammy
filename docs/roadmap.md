@@ -4,37 +4,31 @@ This document records known gaps in glammy and the future-work ideas
 that surfaced during development. Items here are NOT commitments —
 they're material for the next maintainer to evaluate.
 
+## Upstream baseline
+
+This audit is pinned to Telegram Bot API **10.2 (14 July 2026)**. The version is
+a maintenance baseline, not a claim that every method and nested field is
+modelled. glammy deliberately exposes a curated typed surface; intentional and
+known gaps belong in this document and in release notes.
+
 ## Known gaps (could be filled but were skipped)
 
 ### G-1. Bot API methods beyond the typed surface
 
-glammy exposes ~50 typed wrappers (sendMessage, sendPhoto, banChatMember,
-…). The Telegram Bot API has ~120 methods total. The rest are reachable
-via `api.call(api, "methodName", fields, decoder)` — the generic
-escape hatch — but they don't get the same ergonomic helpers.
+glammy exposes a curated set of typed wrappers (sendMessage, sendPhoto,
+banChatMember, …). Other Telegram methods are reachable via
+`api.call(api, "methodName", fields, decoder)` — the generic escape hatch —
+but they don't get the same ergonomic helpers.
 
-**Specifically missing typed wrappers for:** sendMediaGroup,
-editMessageMedia, copyMessages, setStickerSet, getStickerSet,
-uploadStickerFile, createNewStickerSet, addStickerToSet,
-setCustomEmojiStickerSetThumbnail, setStickerPositionInSet,
-deleteStickerFromSet, setStickerSetTitle, deleteStickerSet,
-setStickerEmojiList, setStickerKeywords, setStickerMaskPosition,
-sendPaidMedia, savePreparedInlineMessage, createInvoiceLink,
-getStarTransactions, editUserStarSubscription, editForumTopic,
-hideGeneralForumTopic, unhideGeneralForumTopic,
-unpinAllGeneralForumTopicMessages, getBusinessConnection,
-readBusinessMessage, deleteBusinessMessages, setBusinessAccountName,
-setBusinessAccountUsername, setBusinessAccountBio,
-setBusinessAccountProfilePhoto, removeBusinessAccountProfilePhoto,
-setBusinessAccountGiftSettings, getBusinessAccountStarBalance,
-transferBusinessAccountStars, getBusinessAccountGifts,
-convertGiftToStars, upgradeGift, transferGift, sendGift,
-giftPremiumSubscription, verifyUser, verifyChat, removeUserVerification,
-removeChatVerification, getMyName, getMyShortDescription, getMyName,
-setUserEmojiStatus, getAvailableGifts, getCustomEmojiStickers,
-getMyDefaultAdministratorRights, sendPaidMessageTip, etc.
+**Representative typed-wrapper gaps:** the Rich Message family;
+`editMessageMedia` and `copyMessages`; most sticker-set lifecycle
+methods such as `getStickerSet`, `createNewStickerSet`, and
+`setStickerSetThumbnail`; paid-media, Stars, gift, and business-account
+management families; and several profile/verification helpers. This is a
+maintained description of the gap categories, not an exhaustive method
+inventory. Recheck the pinned Bot API schema before implementing one of them.
 
-**Why skipped:** Diminishing returns. Adding 70 more typed wrappers
+**Why skipped:** Diminishing returns. Adding many more typed wrappers
 mostly duplicates the pattern. Users who need them either:
 1. Call `api.call/4` directly with a custom decoder, or
 2. Send a PR with a typed wrapper
@@ -59,50 +53,144 @@ rationale as G-2.
 ### G-4. Checklist (recent Telegram feature)
 
 `Checklist`, `ChecklistTask`, `ChecklistTasksDone`, `ChecklistTasksAdded`
-message kinds aren't decoded. Tests pass for current shapes; if Telegram
-adds more fields, the `OtherUpdate` fallback handles unknown updates
-gracefully.
+message kinds aren't decoded. Unknown top-level update kinds are preserved as
+`OtherUpdate(RawUpdate)`, and currently modelled open discriminators have
+`Unknown*` fallbacks with fixtures. The complete raw objects for `User`, `Chat`,
+`Message`, `Poll`, `PollOption`, and `PollAnswer` are recoverable through
+`RawObject`; other known nested records can still lose omitted fields.
 
-### G-5. Inline query result button + sticker keyboards
+### G-5. Sticker-keyboard coverage
 
-`InlineQueryResultsButton` (the "switch to web app" button shown above
-inline results) isn't exposed. Only inline result items are.
+`InlineQueryResultsButton` is now a validated sum type and is supported by
+`answer_inline_query_with_options`. Sticker-specific keyboard and sticker-set
+lifecycle ergonomics remain intentionally curated rather than exhaustive.
 
-### G-6. ChatBoostSource Premium gift / paid subtypes
+### G-6. Business account schema beyond the connection envelope
 
-`ChatBoostSourcePaid` and refined premium boost source fields aren't
-modelled. Current `ChatBoostSource` decodes the common case.
+`BusinessConnection` and its current `BusinessBotRights` are decoded, but the
+larger business-account method and object graph is not modelled. The missing
+typed wrappers are listed in G-1. `ChatBoostSource`, by contrast, currently
+covers all three documented 10.2 variants: Premium, GiftCode, and Giveaway.
 
-### G-7. `LinkPreviewOptions` send-side encoding
+### G-7. Intentional Bot API 10.2 schema and rich-media gaps
 
-We decode `LinkPreviewOptions` on incoming messages but don't expose a
-builder for outgoing send-message `link_preview_options` argument. The
-caller can construct the JSON manually.
+`LinkPreviewOptions` is now typed in both directions. Still intentionally
+unmodelled are the Rich Messages / `InputRichMessage*` graph, Community types
+and message service fields, parsed/entity poll text and poll media,
+`InputMediaLivePhoto`, video cover/start timestamps, rich suggested-post
+parameters, and several newer media/entity subgraphs. Guest identifiers,
+ephemeral delivery fields, and join-request query responses are now
+first-class. For outbound gaps, applications can use
+`api.prepare_json_call` or upload-capable `api.prepare_multipart_call` with an
+application-owned response decoder; raw JSON is not accepted by the high-level
+wrappers.
 
-### G-8. `MessageReactionUpdated.is_big`, `actor_chat`
+### G-8. Nested schema parity
 
-Message reactions are partially modelled; some fine-grained fields
-(`is_big`, type-of-actor) are not surfaced as record fields. The raw
-JSON is accessible via the inherited `forward_origin: Option(Dynamic)`
-pattern — but only on Message, not on reactions.
+Raw fallback protects unknown top-level updates and open enum discriminators.
+It also preserves the complete object for the six central records listed in
+G-4. Other known records still ignore unmodelled fields, so every Bot API
+baseline bump must audit them and add fixtures for newly supported fields.
+
+### G-9. Minimal location, venue, contact, and dice wrappers
+
+The typed wrappers for `sendLocation`, `sendVenue`, `sendContact`, and
+`sendDice` cover their core values but not the complete 10.2 option sets.
+`sendDice` now accepts only Telegram's finite outbound emoji set.
+Notably, location/venue/contact do not yet expose ephemeral
+`receiver_user_id` / `callback_query_id`, and the four wrappers omit several
+delivery, reply, and endpoint-specific options. Use the JSON or multipart
+prepared-call constructor when those fields are required. Full endpoint-specific
+option records belong in a future minor release rather than silently accepting
+raw JSON in these helpers.
+
+### G-10. Long-polling lifecycle surface
+
+`bot.start` remains a blocking call. Applications must supervise it and ensure
+that only one poller uses a bot token; glammy has no first-class stop handle,
+readiness signal, or double-start guard. Owner-aware diagnostic guards and
+handler brokers clean up their immediate library-owned tasks when the direct
+caller dies, but they are not a managed runtime: detached `composer.fork`
+tasks, arbitrary descendants, and already-started external effects are outside
+their barriers. Any proposed lifecycle API would need to define those boundaries
+explicitly rather than imply rollback or descendant ownership.
+
+## Closed foundations
+
+These are current capabilities, not future work:
+
+- Unknown top-level update kinds survive as opaque `RawUpdate` values;
+  `ChatType`, `StickerType`, `ReactionType`, `ChatMember`, and
+  `ChatBoostSource` retain unknown discriminators.
+- `PreparedCall(value)`, `to_http_request`, and `from_http_response` provide a
+  sans-I/O protocol boundary while `api.execute` remains the HTTP convenience.
+- Outbound high-level calls use finite parse/action/poll/reaction types, typed
+  reply markup, validated plain poll text/collections/quiz-only explanation,
+  bounded descriptions, command collections, invite-link options, HTTPS-only
+  URL values, and endpoint-specific media options. Generic prepared calls are
+  the explicit escape hatch.
+- Long polling classifies transient/permanent failures and isolates every
+  handler behind a monitor and timeout with an explicit failure policy. Fatal
+  mid-batch failures checkpoint only the already-consumed update prefix.
+  Credential verification and the optional initial drain use the same
+  transient retry/backoff policy as steady-state polling. A caller-monitoring
+  broker owns each linked handler worker, while `bot.with_callback_timeout`
+  configures diagnostic callbacks' bounded deadline (5 seconds by default),
+  redacted failures, and owner-aware task cleanup. Callback failure cannot
+  replace the runner's typed result, and caller death cannot orphan those
+  immediate library-owned tasks.
+- Slow assistant/LLM work has an opt-in bounded keyed executor with FIFO
+  per-chat ordering, global concurrency, active-plus-queued capacity, typed
+  backpressure, monitored outcomes, and a fail-closed polling gate.
+- Sessions and conversations use bounded `gleam_otp` actors with typed
+  lifecycle errors. Sessions commit with optimistic CAS and at-most-once
+  post-commit effects after an observed commit; conversations use
+  receipt-acknowledged, non-blocking workers tracked by a two-phase lifecycle
+  coordinator and registry-plus-workers shutdown barrier.
+- Mutation and routing calls distinguish a guaranteed pre-start timeout from
+  an outcome-unknown timeout. Unknown mutations are not blindly retried and an
+  unknown conversation route suppresses downstream and fails the polling gate;
+  callers must reconcile before retrying because a late receipt may execute.
+- Conversation completion, explicit/replacement stop, typed infrastructure
+  failure, and worker crashes have outcome callbacks; explicit stop cooperates
+  with an active wait before falling back to a bounded kill for a hung thunk.
+- Decoded `Update` values preserve the full raw envelope. Ordered bot update
+  gates can report consumed after application-owned persistence, pass, or fail,
+  and infrastructure can prepend an outermost API transformer. Synchronous and
+  isolated webhook paths preserve gate failures for retriable HTTP responses.
+  These are replay foundations, not a claim that persistent conversations
+  already exist.
+- Guest replies, join-request-query decisions, all Bot API 10.2 ephemeral
+  edit/delete operations (including reuse-only media), finite dice emoji,
+  validated poll schedules/country codes, and inline-query result buttons have
+  typed high-level paths.
+- The stdlib-only `scripts/telegram_bot_api_schema.py` parser compares the
+  checked-in Bot API 10.2 structural snapshot with Telegram's official page. A
+  fixture-only suite runs in normal CI, while a separate scheduled/manual
+  workflow reports upstream structural drift without putting a network
+  dependency in PRs. This detects upstream changes; it does not prove full
+  glammy API parity.
 
 ## Future-work ideas
 
 ### F-1. Conversations: persistent / replayable
 
-The current `glammy/conversations.gleam` is single-process. A
-persistent version would:
+The current `glammy/conversations.gleam` uses an OTP registry plus one worker
+per active flow, but all state remains in memory. The prerequisites now in the
+core are full raw update envelopes, fail-closed update gates, and an outermost
+API transformer. A persistent version would still need to:
 
-1. Log every API call inside the conversation
-2. On bot restart, replay the log against new API responses to
-   reconstruct conversation state
-3. Persist intermediate state to a `session.Storage`-style backend
+1. Persist a versioned journal before delivering waits or external effects
+2. Replay recorded outcomes while checking step fingerprints for divergence
+3. Quarantine an `EffectStarted` without `EffectFinished` as ambiguous
+4. Use backend-native compare-and-swap across processes/nodes
 
-This is the approach of `@grammyjs/conversations`. It's a non-trivial
-module (~2k lines in TS), would need its own subdirectory in glammy.
+This is the approach of `@grammyjs/conversations`. It is a separate persistence
+model, not a safe extension of the current in-memory worker.
 
-Suggested design: separate `glammy/conversations_persistent.gleam`,
-keep the simple one as `glammy/conversations.gleam`.
+Suggested design: a separate `glammy/durable_conversations.gleam` with a
+bytes-oriented store and backend-native CAS. Do not reuse `session.Storage`:
+its atomicity belongs to one actor handle and cannot coordinate nodes.
 
 ### F-2. WebApp data validation
 
@@ -128,8 +216,9 @@ be a separate transformer or share infrastructure.
 
 ### F-5. ETS-backed session storage
 
-A drop-in `session.ets_storage()` that uses Erlang's ETS instead of
-the Subject-based actor. Faster for high-traffic bots.
+A drop-in `session.ets_storage()` that uses Erlang's ETS instead of the
+current OTP storage actor. This may be faster for high-traffic bots, but needs
+benchmarks and must retain the same typed timeout/lifecycle contract.
 
 ```gleam
 let storage: session.Storage(MyState) = session.ets_storage("my_table")
@@ -171,21 +260,20 @@ A `glammy/debug.gleam` module with:
 
 ## Maintenance reminders
 
-- **Telegram Bot API releases** typically happen ~monthly. Audit
-  `types.gleam`'s Update variants and Message fields against the latest
-  bot API changelog every few months.
-- **gleam-lang package versions** in `gleam.toml` use minor-version
-  ranges (`>= X.Y.0 and < X+1.0.0`). Periodically bump the lower bound
-  to pick up new features.
-- **Erlang/OTP compatibility** — we use `crypto:hash_equals/2`,
-  `crypto:strong_rand_bytes/1`, `lists:sort/1`, `erlang:div/2`.
-  All present in OTP 24+.
+- **Telegram Bot API releases:** run
+  `python3 scripts/telegram_bot_api_schema.py check` for every upstream release
+  and before every glammy release. Update the pinned baseline only after review,
+  and record intentional gaps in release notes.
+- **gleam-lang package versions** in `gleam.toml` use bounded major-version
+  ranges. Periodically review lower bounds and the resolved manifest.
+- **Compiler/runtime compatibility:** the package constraint accepts Gleam
+  `>= 1.16.0`. CI resolves the dependency floors on Gleam 1.16.0 / OTP 27 and
+  verifies locked builds on Gleam 1.17.0 / OTP 28 and OTP 29. Other pairings,
+  including OTP 24–26, are not currently verified and must not be advertised
+  as supported without a green matrix lane.
 
 ## Out of scope (will not be added)
 
-- **Schema generation from Telegram docs** — grammY's `@grammyjs/types`
-  is generated from a JSON schema. We deliberately don't do this; the
-  manual port is one-time and produces more idiomatic Gleam.
 - **Multi-bot orchestration** — running N bots from one process is
   achievable by spawning N supervised processes; doesn't need a
   glammy-level abstraction.

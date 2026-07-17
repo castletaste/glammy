@@ -12,14 +12,16 @@ glammy (entry)
       │   │   └─ glammy/types           — Telegram types + decoders
       │   ├─ glammy/filter              — Filter enum + query DSL
       │   └─ gleam/erlang/process       — Subject / spawn (for `fork`)
-      ├─ glammy/api                     — HTTP+JSON Bot API client
+      ├─ glammy/api                     — prepared calls + HTTP/JSON client
       │   ├─ glammy/multipart           — multipart/form-data encoder
       │   ├─ glammy/input_file          — File source descriptors
+      │   ├─ glammy/https_url           — validated TLS-only URLs
       │   ├─ glammy/error               — Error variants + `describe`
       │   └─ glammy/internal/json_utils — shared put_optional / opt_str / opt_nested / opt_list
       ├─ glammy/webhook                 — framework-agnostic dispatch
-      ├─ glammy/session                 — per-key state with pluggable storage
-      ├─ glammy/conversations           — single-process linear flows
+      ├─ glammy/session                 — OTP storage actor + optimistic CAS
+      ├─ glammy/conversations           — OTP registry + worker-per-flow
+      ├─ glammy/keyed_executor          — bounded FIFO-per-key scheduler
       ├─ glammy/error_boundary          — catches Erlang try/catch
       │   └─ glammy_ffi.erl             — small Erlang FFI for try_run/1
       ├─ glammy/keyboard                — Inline / Reply keyboard builders
@@ -36,13 +38,13 @@ talks to the Telegram API depends on it.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Application layer    bot.start()      webhook.handle()   │
+│ Application layer    bot.start()  webhook.handle_isolated() │
 ├──────────────────────────────────────────────────────────┤
 │ Pipeline layer       composer  +  context  +  filter      │
 ├──────────────────────────────────────────────────────────┤
 │ Plugin layer         session  conversations  error_bd     │
 ├──────────────────────────────────────────────────────────┤
-│ API layer            api  (with transformers)             │
+│ API layer            api  (prepared calls + transformers) │
 ├──────────────────────────────────────────────────────────┤
 │ Encoding layer       multipart  input_file  json_utils    │
 ├──────────────────────────────────────────────────────────┤
@@ -54,35 +56,116 @@ talks to the Telegram API depends on it.
 
 ### Long-polling path
 
-1. `bot.start` (in `bot.gleam`) calls `api.get_updates`.
-2. Each returned `Update` is fed to `bot.handle_update`.
-3. `handle_update` wraps the update in a `Context` and calls
+1. `bot.start` validates `PollingOptions`, optionally verifies the token, then
+   calls `api.get_updates`.
+2. A fetched batch is processed sequentially so offset advancement is
+   deterministic.
+3. Each update runs through `bot.handle_update_isolated` behind an isolation
+   broker. The broker monitors its direct caller, owns a linked handler worker,
+   and applies a bounded timeout. Polling waits for that result before starting
+   the next update. If the caller dies, including during supervisor teardown,
+   the broker cleans up its worker instead of leaving library-owned dispatch
+   orphaned.
+4. A panic or confirmed timeout becomes `BotRuntimeError`; the configured
+   failure policy may skip a confirmed crash or stop polling. Gate/store
+   failures and all timeout/outcome uncertainty always fail closed. If a fatal
+   failure follows consumed updates in the same batch, a short
+   `getUpdates(offset = failed_update_id)` checkpoints only that prefix before
+   returning; a failed checkpoint is preserved as typed uncertainty.
+5. Inside the worker, `handle_update` wraps the update in a `Context` and calls
    `composer.run`.
-4. `composer.run` folds the middleware stack right-to-left into a
+6. `composer.run` folds the middleware stack right-to-left into a
    nested closure, then invokes the outermost one.
-5. Each middleware either calls `next()` (passing control on) or
+7. Each middleware either calls `next()` (passing control on) or
    short-circuits.
-6. If a handler invokes `api.send_message` (or another method), the
-   call passes through every registered transformer before the HTTP
-   layer.
-7. The HTTP layer uses `gleam_httpc` to POST to Telegram, then decodes
-   the envelope.
+8. If a handler invokes `api.send_message` (or another method), the call
+   passes through every registered transformer before the built-in transport.
+9. The built-in transport uses `gleam_httpc` to POST to Telegram, classifies
+   the HTTP response, then decodes the Bot API envelope.
+
+Handler isolation is not parallel batch processing. Diagnostic callbacks run
+behind an owner-aware guard with a deadline configured by
+`bot.with_callback_timeout` (5 seconds by default, constrained to BEAM's
+positive receive-timeout range). A timeout kills the callback task and permits
+up to one additional second for termination confirmation. A
+callback crash or timeout is reported with redacted text and cannot replace the
+runner's typed result. The guard also tears down the actual callback task if its
+direct caller dies.
+
+`composer.fork` remains a low-level unbounded, detached primitive, and arbitrary
+handler descendants are not included in either ownership barrier. Use
+`keyed_executor.update_gate` for bounded slow work with FIFO ordering per
+chat/key and explicit backpressure.
+Update gates short-circuit in registration order: install the specialized
+`conversations.update_gate` before a broader keyed-executor gate.
+For the executor gate, `Some(key)` transfers the whole update to its queued
+operation; the normal composer runs only for `None` or an earlier `Continue`.
+Termination cannot undo an external effect that already started.
+
+`bot.start` itself is blocking, not a managed runtime. The application owns
+supervision and the invariant of one poller per bot token. There is no
+first-class stop handle, readiness signal, or double-start guarantee.
+
+### Custom transport path
+
+`api.PreparedCall(value)` keeps the method, payload, and result decoder
+together without storing a bot token. Applications that use another HTTP
+client split transport from protocol handling explicitly:
+
+```text
+prepare_json_call / prepare_multipart_call
+                  │
+                  ▼
+          to_http_request          (no dispatch)
+                  │
+                  ▼
+      application-owned transport
+                  │
+                  ▼
+        from_http_response          (status + envelope + value decode)
+```
+
+Both sides use standard `gleam/http` values: `Request(BitArray)` and
+`Response(BitArray)`. The prepared call is opaque, so the response cannot be
+decoded without the method-specific decoder that created it. `api.execute`
+uses the same prepared-call model with `gleam_httpc` as a convenience.
 
 ### Webhook path
 
-1. Caller's HTTP server hands a POST body to `webhook.handle`.
-2. `webhook.handle` parses it as an `Update`.
-3. Dispatch from step 3 above — identical thereafter.
+1. Caller's HTTP server hands a POST body to `webhook.handle_isolated` (or the
+   secret-validating `webhook.handle_isolated_with_secret`).
+2. The adapter parses it as an `Update`.
+3. Dispatch runs through `bot.handle_update_isolated` behind the same
+   caller-monitoring broker and linked library-owned handler worker. A panic or
+   hang becomes `WebhookError.HandlerFailed` instead of taking down the HTTP
+   process, and caller death cleans up that worker.
+
+`webhook.handle` and `handle_with_secret` remain synchronous for callers that
+deliberately manage their own isolation boundary.
 
 ## Core types map
 
 | Telegram concept            | glammy type                                               |
 | --------------------------- | --------------------------------------------------------- |
-| Bot API method call         | `api.call` / `api.call_multipart`                         |
-| Bot API response envelope   | `error.GlammyError` (`ApiError` / `HttpError` / `Decode`) |
+| Bot API method call         | `api.PreparedCall(value)`                                 |
+| Custom HTTP boundary        | `api.to_http_request` / `api.from_http_response`           |
+| Bot API response envelope   | `error.GlammyError` (`ApiError` / transport / status / decode) |
 | Update                      | `types.Update { update_id, kind: types.UpdateKind }`      |
-| All 23 Update sub-shapes    | `types.UpdateKind` variants (+ `OtherUpdate` fallback)    |
+| Supported Update sub-shapes | `types.UpdateKind` variants (+ unknown-update fallback)   |
 | File reference              | `input_file.InputFile`                                    |
+| URL-free file source        | opaque `input_file.FileIdOrUpload`                        |
+| Outbound poll text/options  | opaque `types.PollQuestion` / `types.InputPollOption` / `types.InputPollOptions` |
+| Complete outbound poll      | opaque `api.SendPoll`                                     |
+| Poll explanation/description | opaque `api.PollExplanation` / `api.PollDescription`     |
+| Send/reply target state     | opaque `message_options.MessageDelivery`                  |
+| Ephemeral media edit        | opaque `input_media.ReuseOnlyInputMedia`                  |
+| Delete batch identifiers   | opaque `api.MessageIds`                                    |
+| Forward batch identifiers  | opaque ordered `api.ForwardMessageIds`                     |
+| Bot commands                | opaque `types.BotCommand` / `types.BotCommands`            |
+| Invite-link options         | opaque `api.ChatInviteLinkOptions`                         |
+| Required HTTPS URL          | opaque `https_url.HttpsUrl`                                |
+| Webhook secret              | `webhook_secret.WebhookSecret`                            |
+| Inline answer collection    | `inline_query_results.InlineQueryResults`                 |
 | Multipart payload           | `multipart.Encoded { body, content_type }`                |
 | Filter query                | `filter.Query` (opaque, from `filter.parse`)              |
 
@@ -105,52 +188,82 @@ talks to the Telegram API depends on it.
    `session.with_session`) or via separate side-channels (see
    `conversations`).
 
-4. **No global mutable state.** Every "stateful" component
-   (memory storage, conversations registry) is a BEAM process accessed
-   via `Subject`. State lives in the process's mailbox loop.
+4. **No global mutable state.** Session storage and the conversation registry
+   are `gleam_otp` actors exposed through opaque handles. Calls are monitored
+   and bounded; explicit stop operations define their lifecycle.
 
-5. **HTTP layer can be bypassed by transformers.** A transformer that
-   never calls `next` returns a synthetic body — useful for tests
-   (see `client_test`).
+5. **Transport is an application boundary.** A caller can turn an opaque
+   prepared call into a standard request, dispatch it with any client, and
+   parse the standard response separately. The convenience `httpc` path still
+   supports the existing transformer chain; a transformer that never calls
+   `next` returns a synthetic envelope (see `client_test`).
 
-## Subject-actor pattern
+## OTP actor and worker model
 
-Two modules spawn BEAM processes that hold state:
+`session` and `conversations` use `gleam_otp/actor`; callers receive opaque
+handles rather than owning mailbox loops.
 
-- `session.memory_storage()`
-- `conversations.new_registry()`
+The storage actor serializes versioned reads, writes, deletes, and
+compare-and-set commits. A session transition runs in the caller after a
+versioned read, so slow application code does not block unrelated storage
+keys. A conflicting commit retries the pure transition up to a bounded limit.
+`SessionUpdate` separates the value from its `after_commit` effect; the effect
+runs at most once after this process observes a successful commit. A crash can
+omit it, so durable delivery requires an outbox. Globally unique revisions
+protect live keys from ABA; deleted keys share an absence epoch so their
+per-key revision entries can be discarded. A delete may therefore trigger a
+safe retry for an unrelated transition that also read a missing key.
 
-Both use the same setup dance:
+The conversation registry is keyed by `<chat.id>:<from.id>` by default, with a
+custom key function available. `start` creates a dedicated worker and uses a
+two-phase lifecycle handshake before unlinking and registering it, then the
+worker executes the blocking `wait` flow while polling continues. Tokens and
+wait generations prevent a stale timeout or replaced conversation from
+removing the current waiter. The local `wait` receive and its registry calls
+are bounded separately. Route success follows matching worker dequeue plus a
+registry-accepted receipt, not mailbox enqueue. Mutation and route calls
+distinguish pre-start timeouts from outcome-unknown operations; unknown and
+still-pending routes fail closed. Polling uses `conversations.update_gate` so
+that uncertainty also prevents Telegram offset advancement. The
+lifecycle coordinator cancels orphan starts and exits only after the registry
+and every tracked worker are down, making it the shutdown barrier. An optional
+typed outcome callback observes completion, stop, typed infrastructure failure,
+or crash; explicit stop first offers a short cooperative `Cancelled` path and
+then kills a hung thunk.
 
-```gleam
-let setup_subject = process.new_subject()
-let _ = process.spawn(fn() {
-  let work_subject = process.new_subject()
-  process.send(setup_subject, work_subject)
-  state_loop(work_subject, initial_state)
-})
-let work_subject = process.receive_forever(setup_subject)
-// `work_subject` is owned by the spawned process — sending to it
-// reaches the loop's `receive_forever`.
-```
+These guarantees are process-local. Session atomicity across multiple
+`Storage` handles or BEAM nodes requires backend-native transactions/CAS, and
+an unacknowledged custom mutation retires its handle until the backend is
+reconciled. Conversation state is lost when its actors or the application
+restart.
 
-Why the dance: `process.new_subject()` creates a Subject owned by the
-*caller's* process. If the caller (parent) makes a subject and the
-spawned (child) does `receive_forever(subject)`, the child receives
-from its OWN mailbox, never seeing messages sent to the parent. The
-two-step setup gives the child a Subject *it owns*, which the parent
-then captures.
+Decoded updates retain their original raw envelope, bot update gates can fail
+closed before middleware, and infrastructure transformers can be prepended.
+Those boundaries support a future journaled replay engine without pretending
+the current linear conversations are durable.
+
+The keyed executor is also process-local. Its scheduler stores FIFO queues per
+key, enforces one active job per key plus a global active limit, and counts both
+running and queued jobs against capacity. Monitored wrappers isolate user
+operations; a per-job arbiter emits one completion, crash, cancellation, or
+executor-termination outcome. Cancellation and executor-termination outcomes
+are held behind the actual user-process `DOWN` barrier, even when that process
+traps exits or the scheduler dies abruptly. Admission deadlines prevent a
+suspended scheduler from accepting stale work after the caller has timed out.
+An unknown admission still requires reconciliation before retry, and accepted
+jobs do not survive process or node loss without application-owned persistence.
 
 ## File-by-file responsibilities
 
-- **`glammy.gleam`** — top-level entry; just a banner `main` and module
-  re-export documentation.
-- **`glammy/types.gleam`** — every Telegram type used by glammy, with a
-  matching `*_decoder()` function. ~2400 lines, single-file by choice
-  (see [design-decisions.md](design-decisions.md)).
+- **`glammy.gleam`** — compact facade for the common API client, composer,
+  context reply, bot construction, and polling flow.
+- **`glammy/types.gleam`** — supported Telegram types and their decoders;
+  kept in one module by choice
+  (see [design-decisions.md](https://github.com/castletaste/glammy/blob/main/docs/design-decisions.md)).
 - **`glammy/error.gleam`** — `GlammyError` sum type + `describe/1`.
-- **`glammy/api.gleam`** — `Api` opaque client, transformer chain, `call`
-  / `call_multipart` dispatch, ~50 typed Bot API method wrappers.
+- **`glammy/api.gleam`** — opaque `Api` and `PreparedCall(value)`, transport-free
+  request construction and response parsing, the backwards-compatible transformer
+  chain, built-in `httpc` execution, and typed Bot API wrappers.
 - **`glammy/composer.gleam`** — `Composer` opaque type, middleware
   primitives (`use_middleware`, `handle`), filtering combinators
   (`on`, `on_query`, `filter`, `drop`, `branch`, `route`,
@@ -165,52 +278,80 @@ then captures.
   Implements L1/L2 shortcuts (`msg`, `edit`), default expansion
   (`:text`, `::url`), structural validation against the update tree.
 - **`glammy/keyboard.gleam`** — `InlineKeyboard` / `ReplyKeyboard`
-  builders with `transpose` / `flow` / `append` post-processors.
-- **`glammy/bot.gleam`** — `Bot` opaque type, `start`, `handle_update`,
-  `on_error`, polling options.
+  builders with `transpose` / `flow` / `append` post-processors, plus
+  endpoint-specific game/invoice keyboards whose launch/Pay button is first by
+  construction.
+- **`glammy/bot.gleam`** — `Bot` opaque type, validated polling options,
+  sequential offset handling, owner-aware isolated handler workers, bounded
+  diagnostic callbacks, runtime failure policy, `start`, `handle_update`, and
+  `handle_update_isolated`.
 - **`glammy/webhook.gleam`** — `handle` / `handle_with_secret` /
   `verify_secret`. Framework-agnostic.
-- **`glammy/session.gleam`** — `Storage(value)` opaque, `memory_storage`,
-  `custom_storage`, `with_session` composer integration,
-  `by_chat_id`/`by_user_id`/`by_chat_and_user` key fns.
-- **`glammy/conversations.gleam`** — `Registry` + `middleware` + `start`
-  + `wait` for linear flows. User-keyed.
+- **`glammy/webhook_secret.gleam`** — shared opaque, validated
+  `WebhookSecret` used by both `setWebhook` registration and request
+  verification.
+- **`glammy/https_url.gleam`** — absolute, host-bearing HTTPS URLs without
+  embedded credentials for webhook, Mini App, and login-button fields.
+- **`glammy/session.gleam`** — OTP-backed `Storage(value)`, versioned CAS,
+  typed backend failures, `SessionUpdate`, `update_then`, `with_session`,
+  lifecycle operations, and chat/user key functions.
+- **`glammy/conversations.gleam`** — OTP registry + monitored workers for
+  non-blocking linear flows, default chat-and-user keys, bounded waits, custom
+  keys, worker receipt acknowledgements, a polling update gate, cooperative
+  cancellation, typed terminal outcomes, and explicit lifecycle operations.
+- **`glammy/keyed_executor.gleam`** — bounded active-plus-queued capacity,
+  FIFO execution per key, a global concurrency ceiling, typed admission
+  ambiguity/backpressure, monitored job outcomes, and bounded shutdown.
 - **`glammy/error_boundary.gleam`** — wraps a sub-composer in Erlang
   `try` (via `glammy_ffi.erl`) so panics don't propagate out.
 - **`glammy/multipart.gleam`** — hand-rolled multipart/form-data encoder
   (`Part`, `Encoded`, `encode/1`) using `crypto:strong_rand_bytes` for
   the boundary.
-- **`glammy/input_file.gleam`** — `InputFile` sum type
-  (`FileId`/`FileUrl`/`FileBytes`/`FilePath`) +
-  `from_path`/`from_url`/`from_bytes`/`from_file_id` constructors +
+- **`glammy/input_file.gleam`** — sans-I/O `InputFile` sum type
+  (`FileId`/`FileUrl`/`FileBytes`) +
+  opaque URL-free `FileIdOrUpload` with `file_id_source`/`upload_source`
+  smart constructors for endpoints such as `sendVideoNote` +
+  `from_url`/`from_bytes`/`from_file_id` constructors +
   `infer_filename`/`requires_upload`/`to_payload_value`.
+- **`glammy/thumbnail.gleam`** — upload-only thumbnail value that prevents
+  file IDs and URLs where Telegram requires a fresh multipart attachment.
 - **`glammy/input_media.gleam`** — `InputMedia*` variants +
   `to_json/2` (with caller-supplied attach resolver).
-- **`glammy/inline_query_results.gleam`** — `InlineQueryResult*` and
+- **`glammy/inline_query_results.gleam`** — opaque `InlineQueryResult`,
+  max-50 `InlineQueryResults`, finite video/document source types, and typed
   `InputMessageContent` builders.
-- **`glammy/constants.gleam`** — every Telegram string constant
-  (parse modes, chat actions, sticker types, currencies, scope names).
+- **`glammy/parse_mode.gleam` / `chat_action.gleam` / `reaction.gleam`** —
+  finite outbound protocol values; inbound unknown-enum fallbacks stay in
+  `types`.
+- **`glammy/media_options.gleam` / `message_options.gleam`** — endpoint-specific
+  media delivery records plus invariant-safe reply parameters.
+- **`glammy/constants.gleam`** — compatibility constants and remaining stable
+  Telegram values (sticker types, currencies, scope names).
 - **`glammy/escape.gleam`** — HTML / Markdown / MarkdownV2 escapers.
 - **`glammy/internal/json_utils.gleam`** — INTERNAL. Shared
   `put_optional` / `opt_str` / `opt_int` / `opt_bool` / `opt_float` /
   `opt_with_default` / `opt_nested` / `opt_list` for the JSON
   build/decode boilerplate. `opt_nested` covers an optional nested
   object field, `opt_list` an optional list field defaulting to `[]`.
-- **`glammy_ffi.erl`** — FFI: `try_run/1` for `error_boundary`.
+- **`glammy/internal/http_response.gleam`** — INTERNAL. Shared HTTP response
+  status/content-type classification for JSON API and webhook boundaries.
+- **`glammy_ffi.erl`** — audited `try_run/1` boundary used to classify panics
+  in error boundaries, polling handlers, session transitions, and callbacks.
 
 ## Conventions
 
 - **Naming:** snake_case for fns / types. Variants use PascalCase.
-- **Labelled args** are used wherever a function takes multiple args of
-  the same primitive type (e.g.
-  `api.get_updates(api, offset: …, limit: …, timeout: …, allowed_updates: …)`).
+- **Labelled args** are preferred for ambiguous same-typed public parameters
+  (for example `api.get_updates`). Remaining legacy wrappers are tracked for
+  API cleanup.
 - **Opaque types** for everything stateful (`Api`, `Composer`, `Bot`,
   `Storage`, `Registry`). Construction via `new`/`memory_storage`/etc.
 - **Result returns** for fallible operations. No exceptions in the
   public API surface.
 - **`Option(T)`** for nullable Telegram fields.
-- **`@external`** only when truly necessary (Erlang try/catch,
-  `crypto:hash_equals`, `crypto:strong_rand_bytes`).
+- **`@external`** only when truly necessary (`glammy_ffi:try_run`,
+  `crypto:hash` / `hash_equals` / `strong_rand_bytes`, and
+  `erlang:monotonic_time`).
 - **`use` syntax** for decoders and shared helpers
   (`use x <- decode.field(…)`).
 - **Tests live in `test/glammy/*_test.gleam`,** mirroring `src/glammy/*.gleam`.

@@ -6,11 +6,11 @@ import gleam/list
 import gleam/string
 
 const markdown_v2_reserved = [
-  "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}",
-  ".", "!",
+  "\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|",
+  "{", "}", ".", "!",
 ]
 
-const markdown_legacy_reserved = ["_", "*", "`", "["]
+const markdown_legacy_reserved = ["\\", "_", "*", "`", "["]
 
 /// Escape user-provided text for `parse_mode: "MarkdownV2"`.
 pub fn markdown_v2(text: String) -> String {

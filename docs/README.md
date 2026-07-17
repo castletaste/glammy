@@ -9,36 +9,49 @@ when you only read the diff.
 
 | Document                                  | Read it when …                                                  |
 | ----------------------------------------- | --------------------------------------------------------------- |
-| [`architecture.md`](architecture.md)      | Onboarding, mapping a feature back to a module                   |
-| [`design-decisions.md`](design-decisions.md) | Touching a load-bearing primitive or planning an API change |
-| [`grammy-parity.md`](grammy-parity.md)    | Adding tests, checking what's covered vs grammY                  |
-| [`roadmap.md`](roadmap.md)                | Picking up future work, evaluating "is X possible here?"         |
+| [`architecture.md`](https://github.com/castletaste/glammy/blob/main/docs/architecture.md) | Onboarding, mapping a feature back to a module |
+| [`design-decisions.md`](https://github.com/castletaste/glammy/blob/main/docs/design-decisions.md) | Touching a load-bearing primitive or planning an API change |
+| [`grammy-parity.md`](https://github.com/castletaste/glammy/blob/main/docs/grammy-parity.md) | Adding tests, checking what's covered vs grammY |
+| [`roadmap.md`](https://github.com/castletaste/glammy/blob/main/docs/roadmap.md) | Picking up future work, evaluating "is X possible here?" |
+| [`releasing.md`](https://github.com/castletaste/glammy/blob/main/docs/releasing.md) | Preparing, validating, and publishing a Hex release |
 
 ## TL;DR
 
 glammy is a from-scratch port of [grammY](https://github.com/grammyjs/grammY)
 (TypeScript Telegram Bot framework) to [Gleam](https://gleam.run) on the
-BEAM. ~7k LOC of Gleam + 1 small Erlang FFI file (`glammy_ffi.erl`).
+BEAM. The implementation is Gleam plus a small, audited Erlang FFI boundary.
 
-**Status:** 201 tests passing, clean build (no warnings). Most of
-grammY's behavioural tests are ported (filter, composer, context, bot,
-session, webhook, keyboard, input_media, constants, error, client,
-payload, inline query results). JS-async-specific tests (Promise
-concurrency, framework adapters, init caching) are intentionally
-omitted.
+**Status:** 0.1.0. The authoritative quality gates are
+`gleam build --warnings-as-errors`, `gleam test`, `gleam docs build`, the
+compiled consumer project in `examples/echo_bot`, the isolated dependency-floor
+build in `scripts/check_min_deps.sh`, and `gleam export hex-tarball` followed by
+the structural/source-parity verifier and unpacked consumer build. The grammY
+mapping is traceability material, not a claim of line-for-line parity or
+exhaustive behavioural coverage.
 
-**Dependencies:** five hex packages, all from the official `gleam-lang`
-GitHub org. Zero third-party deps. See `gleam.toml`.
+**Telegram baseline:** maintenance is currently pinned to Bot API 10.2
+(14 July 2026). This identifies the audited upstream version, not exhaustive
+method or field parity; known gaps live in
+[`roadmap.md`](https://github.com/castletaste/glammy/blob/main/docs/roadmap.md).
+
+**Dependencies:** runtime packages are limited to the official `gleam-lang`
+organisation (`gleam_stdlib`, `gleam_erlang`, `gleam_json`, `gleam_http`,
+`gleam_httpc`, and `gleam_otp`). See `gleam.toml` for the exact constraints.
 
 **Public modules:**
 
-- Core: `glammy/api`, `glammy/types`, `glammy/composer`, `glammy/context`,
-  `glammy/filter`, `glammy/keyboard`, `glammy/bot`, `glammy/error`
-- Media: `glammy/input_file`, `glammy/multipart`, `glammy/input_media`
+- Facade and core: `glammy`, `glammy/api`, `glammy/types`,
+  `glammy/composer`, `glammy/context`, `glammy/filter`, `glammy/keyboard`,
+  `glammy/bot`, `glammy/keyed_executor`, `glammy/error`
+- Protocol values: `glammy/chat_action`, `glammy/message_options`,
+  `glammy/parse_mode`, `glammy/reaction`, `glammy/webhook_secret`,
+  `glammy/https_url`
+- Media: `glammy/input_file`, `glammy/thumbnail`, `glammy/multipart`,
+  `glammy/input_media`, `glammy/media_options`
 - Plugins: `glammy/session`, `glammy/conversations`,
   `glammy/error_boundary`, `glammy/webhook`
 - Helpers: `glammy/constants`, `glammy/escape`,
   `glammy/inline_query_results`
 
-**Internal:** `glammy/internal/json_utils` (shared encoder/decoder
-helpers — not part of the public API).
+**Internal:** `glammy/internal/json_utils` and
+`glammy/internal/http_response` are implementation helpers, not public API.
