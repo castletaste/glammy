@@ -58,7 +58,7 @@ CI, so the quickstart stays aligned with the public API.
 | `glammy/composer`       | Middleware pipeline — `command`, `hears`, `on`, `use_middleware`. |
 | `glammy/context`        | `Context` wrapper passed to every handler.                        |
 | `glammy/filter`         | Strongly-typed enum **and** grammY-style dotted string DSL.       |
-| `glammy/keyboard`       | `InlineKeyboard` and `ReplyKeyboard` builders.                    |
+| `glammy/keyboard`       | Typed inline/reply keyboards, button actions, styles, and icons.  |
 | `glammy/bot`            | Long polling with backoff, isolated handlers, and typed failures. |
 | `glammy/keyed_executor` | Bounded FIFO-per-key work with global concurrency and backpressure. |
 | `glammy/error`          | `GlammyError` variants returned by the client.                    |
@@ -102,7 +102,9 @@ always put the required launch or Pay button first. Inline answers validate
 the 50-result limit. HTML inline videos require replacement content;
 video notes accept only opaque sources built by `input_file.file_id_source` or
 `input_file.upload_source`; webhook registration and verification share one
-validated secret type. Message sends choose one opaque regular/reply/ephemeral
+validated secret type. Self-signed webhook certificates have an upload-only
+typed path, while keyboard copy actions, styles, and custom-emoji icons retain
+exactly one button action. Message sends choose one opaque regular/reply/ephemeral
 delivery state, ephemeral media edits accept reuse-only media, and command or
 batch-message identifiers are validated before dispatch; forward batches also
 prove Telegram's strictly increasing order. Command collections,
@@ -111,7 +113,8 @@ validated before dispatch as well. For a newly released Telegram field that is
 not modelled yet, use the explicit prepared-call family:
 `api.prepare_json_call` for JSON and `api.prepare_multipart_call` for uploads.
 The same seam covers the Local Bot API server's HTTP-webhook exception; the
-high-level `set_webhook` follows the public Bot API's HTTPS-only contract.
+high-level `set_webhook` and `set_webhook_with_certificate` follow the public
+Bot API's HTTPS-only contract.
 
 ## Transformers — API middleware
 
@@ -242,7 +245,12 @@ let running_bot =
 ```
 
 One key runs FIFO with at most one active job; different keys run up to the
-global limit. Capacity counts active plus queued jobs. The outcome subject must
+global limit. Capacity counts active plus queued jobs. Every active job has a
+finite runtime deadline: five minutes with `start`, or
+`Options.job_timeout_ms` with `start_with_options`. Queueing time is excluded.
+On expiry the operation is confirmed down before `TimedOut(timeout_ms)` is
+published and its key, global slot, and capacity are released. External effects
+performed before termination may still have happened. The outcome subject must
 be owned and drained by an application actor. Admission failure is typed and
 fails the update gate, so polling does not acknowledge work rejected under
 backpressure. Admission success is only a volatile in-memory queue receipt:
@@ -260,6 +268,15 @@ Update gates run in registration order and `Consumed` short-circuits later
 gates. Register specialized owners such as conversations before the general
 per-chat executor, as in the example; reversing them would enqueue conversation
 replies as ordinary assistant work.
+
+A conversation owns its key continuously from `start` until completion or
+stop, including computation between two `wait` calls. One update can be held
+across that gap and is acknowledged only after the next wait actually dequeues
+it. A second update receives `RouteBufferFull`, suppresses downstream
+middleware, and fails the polling gate so Telegram supplies backpressure. A
+registry `CallTimeout` also fails routing closed: inability to inspect the
+registry is not proof that this key has no live conversation owner. `Stopped`
+does likewise because registry death can precede the worker shutdown barrier.
 
 ## Polling ownership and shutdown
 
@@ -353,6 +370,7 @@ without a security review — bot tokens are sensitive credentials.
 gleam build
 gleam build --warnings-as-errors
 gleam test
+./scripts/check_keyed_executor_startup_barrier.sh
 gleam docs build
 gleam format --check src test examples/echo_bot/src
 ./scripts/check_min_deps.sh

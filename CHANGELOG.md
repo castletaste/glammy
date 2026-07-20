@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quiz polls, mutually exclusive poll schedules, and bounded country codes.
 - A validated `InlineQueryResultsButton` sum type and optional button support
   for `answerInlineQuery`.
+- Typed keyboard copy actions, finite button styles, custom-emoji icons, and an
+  upload-only certificate path for `setWebhook`.
 - Full raw `Update` envelopes, ordered fail-closed bot update gates, and an
   outermost API-transformer hook as honest foundations for a future durable
   replay engine.
@@ -57,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `WebhookError.HandlerFailed`, allowing the HTTP layer to request retry.
 - A bounded keyed executor for slow work: FIFO per key, a global concurrency
   ceiling, active-plus-queued capacity, typed admission/backpressure, monitored
-  jobs, observable terminal outcomes, and a fail-closed bot update gate.
+  jobs, a finite configurable active-job deadline, observable terminal
+  outcomes, and a fail-closed bot update gate.
 - A checked-in Bot API structural snapshot, fail-closed stdlib-only drift
   parser, offline fixture tests, and a scheduled/manual upstream drift job.
 
@@ -100,7 +103,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Conversation routing is acknowledged only after the matching worker dequeues
   the delivery and the registry accepts its receipt. Polling integrations can
   install `conversations.update_gate` so an unknown receipt never advances the
-  Telegram offset; unresolved routes also reject concurrent retries fail-closed.
+  Telegram offset. Ownership remains continuous between waits with one buffered
+  update; overflow, registry timeout/death, and unresolved routes reject
+  concurrent work fail-closed rather than leaking it into ordinary middleware.
+  Open and wait-registration deadline markers prevent a known-not-started
+  timeout from replacing an owner or registering a waiter after the caller
+  has already continued.
 - `MessageEntity` decodes Bot API 10.2 `date_time` metadata and the filter DSL
   accepts `message:entities:date_time` and `::date_time`.
 
@@ -149,6 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SendInvoiceOptions.reply_markup`.
 - Webhook registration and verification share one validated, inspection-safe
   `WebhookSecret` value.
+- `keyed_executor.Options` now requires `job_timeout_ms`, and accepted jobs can
+  finish with `JobOutcome.TimedOut`. The default deadline is five minutes.
+- Abrupt keyed-executor death now waits through the pre-task attachment window
+  and confirms the real user-operation process is down before publishing
+  `ExecutorTerminated`.
+- Keyboard button unions gained copy/decorator variants. Exhaustive downstream
+  matches must handle them; use the decorator helpers to preserve one action.
 - `InputFile` no longer has a local-path variant, and media thumbnails accept
   only the upload-backed `Thumbnail` type.
 - `Message.pinned_message` and `CallbackQuery.message` now use

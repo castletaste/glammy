@@ -250,13 +250,19 @@ Conversation tokens and per-wait generations prevent stale timeouts and
 replaced workers from deleting or consuming a newer waiter. Local wait receives
 and registry calls are bounded separately. A two-phase lifecycle coordinator
 cancels orphan starts and becomes a registry-plus-workers shutdown barrier.
-Route timeouts distinguish known-not-started from outcome-unknown; the latter
-fails closed instead of invoking downstream middleware. A successful route is
+Route timeouts distinguish known-not-started from outcome-unknown, but neither
+proves that the key lacks a live owner; both fail closed instead of invoking
+downstream middleware. A successful route is
 acknowledged only after the matching worker dequeues `Deliver` and the registry
 accepts its receipt; enqueue alone is not success. While that ownership is
-unresolved, retries are also outcome-unknown. Long-polling applications install
-`conversations.update_gate` so the bot retains such an update instead of
-advancing its Telegram offset. `start_with_outcome`
+unresolved, retries are also outcome-unknown. The worker owns its key
+continuously while computing between waits. The registry may hold one update
+until the next wait is registered; a second update returns `RouteBufferFull`
+and remains fail-closed. If the flow completes normally without another wait,
+the never-delivered buffered route is rejected so downstream middleware may
+resume. Long-polling applications install `conversations.update_gate` so the
+bot retains an uncertain or backpressured update instead of advancing its
+Telegram offset. `start_with_outcome`
 reports completed, stopped, typed infrastructure-failed, or crashed workers
 from an unlinked observer. Explicit stop first wakes an active wait with
 `Cancelled`, then hard-stops a thunk that does not cooperate within the bounded
@@ -264,6 +270,16 @@ grace period. The state remains in-memory: an application restart loses
 in-flight conversations. `RouteOutcomeUnknown` can also mean that a late
 receipt was accepted after the caller lost its acknowledgement; it is a stop-
 and-reconcile result, not permission to retry effects blindly.
+
+`CallTimeout` and `Stopped` also suppress downstream routing: registry silence
+or death cannot prove that a previously registered worker has completed its
+shutdown barrier. Applications must remove a stopped registry middleware only
+after coordinating the surrounding bot lifecycle.
+
+Open and wait-registration mutations use a begin marker followed by an
+authoritative deadline check. A pre-marker timeout is therefore guaranteed not
+to replace an owner or register a waiter later; a lost post-marker decision is
+typed outcome uncertainty and fail-stops the affected worker.
 
 **Why:** grammY's `@grammyjs/conversations` is persistent and
 replayable (it logs every API call, deterministically replays on
@@ -454,14 +470,20 @@ paired with a successful payment answer, or cross-chat reply flags Telegram
 forbids. Ephemeral media edits additionally reject uploads at the type boundary
 because Telegram accepts only reusable file identifiers or URLs there.
 
+`CopyTextButton`, finite button styles, and custom-emoji icons preserve one
+action per keyboard button. `set_webhook_with_certificate` uses an upload-only
+certificate type, so the Bot API's forbidden file-id and URL forms cannot be
+constructed.
+
 **Escape hatch:** Bot API 10.2 still has intentional rich-media gaps (parsed
-poll text/entities/media, live photos, suggested-post structures). The prepared-call
-family is the low-level extension seam: use `prepare_json_call` for JSON-only
-requests and `prepare_multipart_call` when a gap requires uploads. Typed
-wrappers do not sprinkle `json.Json` fields through otherwise safe records.
-This also keeps the Local Bot API server's HTTP-webhook exception explicit:
-high-level `set_webhook` models the public HTTPS-only endpoint, while local
-deployments can prepare that transport-specific call themselves.
+poll text/entities/media, live photos, suggested-post structures). The
+prepared-call family is the low-level extension seam: use `prepare_json_call`
+for JSON-only requests and `prepare_multipart_call` when a gap requires
+uploads. Typed wrappers do not sprinkle `json.Json` fields through otherwise
+safe records. This also keeps the Local Bot API server's HTTP-webhook exception
+explicit: high-level webhook registration models the public HTTPS-only
+endpoint, while local deployments can prepare that transport-specific call
+themselves.
 
 ## D-22. Slow work uses a bounded keyed executor
 
@@ -470,9 +492,14 @@ capacity, runs no more than the global concurrency limit, and executes jobs for
 one key strictly FIFO with at most one active job per key. User operations run
 outside the scheduler in monitored isolation. Every accepted job has one
 terminal outcome arbiter, and shutdown is a bounded monitor barrier.
-`Cancelled` and `ExecutorTerminated` are not observable until the actual user
-operation is confirmed down, including operations that trap exit signals and
-abrupt scheduler death.
+Every active job also has a finite runtime deadline, measured from its actual
+start rather than queue admission. `TimedOut`, `Cancelled`, and
+`ExecutorTerminated` are not observable until the actual user operation is
+confirmed down, including operations that trap exit signals and abrupt
+scheduler death. A startup worker is monitored and acknowledged by the arbiter
+before it may create that operation, so executor death cannot overtake task
+attachment. The arbiter publishes that one terminal outcome before the
+scheduler releases the key, global slot, and capacity.
 
 Admission returns typed full/stopping/stopped/deadline/unknown states. `Ok` is
 only a volatile in-memory queue receipt, not job completion or durable effect
@@ -485,4 +512,5 @@ chats, while raw `composer.fork` has neither a capacity bound nor per-chat
 ordering. A keyed actor scheduler makes the concurrency contract explicit and
 testable without pretending to be a durable queue. Applications still need an
 outbox, journal, or idempotency keys when accepted work must survive executor or
-node loss, and must reconcile `AdmissionOutcomeUnknown` before retrying.
+node loss, must treat pre-timeout external effects as potentially committed,
+and must reconcile `AdmissionOutcomeUnknown` before retrying.

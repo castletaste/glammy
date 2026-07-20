@@ -55,12 +55,12 @@ percentage misleading.
 | ---- | --------------- | ----------------- |
 | Filters | `filter_test.gleam`, `filter_dsl_test.gleam` | Typed filters, dotted queries, shortcuts, defaults, invalid input |
 | Telegram decoding | `types_test.gleam`, `more_types_test.gleam` | Update variants, raw fallback, open-enum fallbacks, representative nested types |
-| API protocol | `client_test.gleam`, `api_contract_test.gleam`, `sans_io_test.gleam` | Envelope/status classification, prepared calls, standard HTTP boundary |
+| API protocol | `client_test.gleam`, `api_contract_test.gleam`, `sans_io_test.gleam` | Envelope/status classification, prepared calls, standard HTTP boundary, multipart webhook certificates |
 | Files and media | `input_file_test.gleam`, `input_media_test.gleam`, `multipart_test.gleam` | Sans-I/O descriptors, media encoding, multipart boundaries/uploads |
-| UI builders | `keyboard_test.gleam`, `inline_query_results_test.gleam` | Keyboard variants and representative inline result builders |
+| UI builders | `keyboard_test.gleam`, `inline_query_results_test.gleam` | Keyboard actions, copy text, styles/icons, endpoint invariants, representative inline results |
 | Composition | `context_test.gleam`, `composer_test.gleam`, `transformers_test.gleam` | Context access, middleware control flow, transformer order/short-circuit |
-| State | `session_test.gleam`, `conversations_test.gleam` | CAS conflicts, post-commit effects, actor lifecycle, routing, replacement, typed outcomes, cancellation |
-| Runtime safety | `bot_test.gleam`, `keyed_executor_test.gleam`, `error_boundary_test.gleam` | Polling checkpoints, callback deadlines/ownership, handler isolation/policies, bounded keyed concurrency, panic boundaries |
+| State | `session_test.gleam`, `conversations_test.gleam` | CAS conflicts, post-commit effects, continuous conversation ownership, bounded routing, replacement, typed outcomes, cancellation |
+| Runtime safety | `bot_test.gleam`, `keyed_executor_test.gleam`, `error_boundary_test.gleam` | Polling checkpoints, callback/job deadlines, handler ownership, bounded keyed concurrency, panic boundaries |
 | Webhooks | `webhook_test.gleam` | Parsing, dispatch, secret verification |
 | Helpers | `constants_test.gleam`, `escape_test.gleam`, `error_test.gleam` | Stable values, escaping, error descriptions |
 

@@ -141,16 +141,23 @@ These are current capabilities, not future work:
   immediate library-owned tasks.
 - Slow assistant/LLM work has an opt-in bounded keyed executor with FIFO
   per-chat ordering, global concurrency, active-plus-queued capacity, typed
-  backpressure, monitored outcomes, and a fail-closed polling gate.
+  backpressure, a finite active-job deadline, monitored outcomes, and a
+  fail-closed polling gate. Queue delay does not consume the runtime deadline;
+  timeout publication precedes release of the key and capacity.
 - Sessions and conversations use bounded `gleam_otp` actors with typed
   lifecycle errors. Sessions commit with optimistic CAS and at-most-once
   post-commit effects after an observed commit; conversations use
   receipt-acknowledged, non-blocking workers tracked by a two-phase lifecycle
-  coordinator and registry-plus-workers shutdown barrier.
+  coordinator and registry-plus-workers shutdown barrier. Conversation keys
+  remain owned between waits with one buffered update and typed fail-closed
+  backpressure for overflow.
 - Mutation and routing calls distinguish a guaranteed pre-start timeout from
-  an outcome-unknown timeout. Unknown mutations are not blindly retried and an
-  unknown conversation route suppresses downstream and fails the polling gate;
-  callers must reconcile before retrying because a late receipt may execute.
+  an outcome-unknown timeout. Unknown mutations are not blindly retried;
+  conversation routing fails closed for either timeout because registry silence
+  cannot prove the absence of a live owner. Registry death fails closed too
+  because worker teardown is a separate monitor barrier. Callers must reconcile
+  before retrying because a late receipt may execute. Open and wait-registration
+  begin markers prevent pre-start timeouts from mutating registry state late.
 - Conversation completion, explicit/replacement stop, typed infrastructure
   failure, and worker crashes have outcome callbacks; explicit stop cooperates
   with an active wait before falling back to a bounded kill for a hung thunk.
@@ -163,7 +170,8 @@ These are current capabilities, not future work:
 - Guest replies, join-request-query decisions, all Bot API 10.2 ephemeral
   edit/delete operations (including reuse-only media), finite dice emoji,
   validated poll schedules/country codes, and inline-query result buttons have
-  typed high-level paths.
+  typed high-level paths. Keyboard copy actions, finite button styles,
+  custom-emoji icons, and upload-only webhook certificates are also typed.
 - The stdlib-only `scripts/telegram_bot_api_schema.py` parser compares the
   checked-in Bot API 10.2 structural snapshot with Telegram's official page. A
   fixture-only suite runs in normal CI, while a separate scheduled/manual

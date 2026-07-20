@@ -12,6 +12,10 @@
 //// delivery and the registry has accepted that process-local receipt. This is
 //// not durable completion of the user thunk: a crash after receipt still needs
 //// an application journal if the update must be replayed across process loss.
+//// Between successive waits, ownership remains continuous with one buffered
+//// update per key; further updates receive typed fail-closed backpressure.
+//// Open and wait-registration mutations cross a begin marker followed by an
+//// authoritative deadline check, so a known timeout cannot mutate state late.
 
 import glammy/bot
 import glammy/composer.{type Middleware}
@@ -41,12 +45,19 @@ pub type RegistryError {
   /// Actor-call timeouts must be within `1..4_294_967_295` milliseconds.
   InvalidCallTimeout(Int)
   StartFailed(String)
+  /// The registry did not inspect or answer the call before its deadline.
+  /// For routing, this does not prove that the key has no live owner and both
+  /// middleware and polling integrations therefore fail closed.
   CallTimeout
   /// Routing began but no accepted-or-rejected receipt can be proven. The
   /// update may already belong to the conversation and must not run downstream.
   /// A retry needs reconciliation or idempotency: a late accepted receipt may
   /// still execute after this error has been returned.
   RouteOutcomeUnknown
+  /// The conversation still owns this key, but its single between-waits
+  /// buffer is already occupied. The update was not delivered or consumed;
+  /// callers must apply backpressure instead of continuing downstream.
+  RouteBufferFull
   /// A wait-state mutation began but its acknowledgement was lost. The worker
   /// is fail-stopped before its thunk can continue, and its observer receives
   /// `ConversationFailed(WaitStateOutcomeUnknown)`.
@@ -57,6 +68,8 @@ pub type RegistryError {
   /// The bounded registry-and-workers shutdown barrier did not complete. The
   /// registry, a tracked worker, or both may still be alive.
   RegistryStopTimeout
+  /// The registry cannot accept new work. Routing fails closed because registry
+  /// death alone does not prove that every previously registered worker is down.
   Stopped
 }
 
@@ -637,9 +650,10 @@ pub fn stop_conversation(
 
 /// Route replies to active conversations.
 ///
-/// Errors that are known to have happened before routing continue downstream.
-/// An outcome-unknown route fails closed so one update is never processed both
-/// inside and outside the conversation.
+/// Errors that prove no owner exists continue downstream. Registry timeouts,
+/// outcome-unknown routes, and buffer-full routes fail closed so an active or
+/// temporarily unobservable conversation never leaks its key's updates into
+/// ordinary middleware.
 ///
 /// This generic middleware cannot make polling retain an uncertain update;
 /// long-polling bots should use `update_gate` at `bot.with_update_gate`.
@@ -661,7 +675,10 @@ pub fn middleware_with_error(
         case registry_route_call(registry, ctx.update, key) {
           Ok(True) -> Nil
           Ok(False) -> next()
+          Error(CallTimeout) -> on_error(CallTimeout)
+          Error(Stopped) -> on_error(Stopped)
           Error(RouteOutcomeUnknown) -> on_error(RouteOutcomeUnknown)
+          Error(RouteBufferFull) -> on_error(RouteBufferFull)
           Error(error) -> {
             on_error(error)
             next()
@@ -712,6 +729,10 @@ fn registry_update_gate_error(error: RegistryError) -> bot.UpdateGateError {
       "conversation_route_outcome_unknown",
       "conversation route receipt outcome is unknown",
     )
+    RouteBufferFull -> #(
+      "conversation_route_buffer_full",
+      "conversation route buffer is full",
+    )
     WaitStateOutcomeUnknown -> #(
       "conversation_wait_state_outcome_unknown",
       "conversation wait-state outcome is unknown",
@@ -740,18 +761,29 @@ type RouteReply {
   RouteAccepted
   RouteRejected
   RouteAmbiguous
+  RouteBackpressured
 }
 
 type PendingRoute {
   PendingRoute(reply_to: Subject(RouteReply))
 }
 
+type BufferedRoute {
+  BufferedRoute(update: Update, reply_to: Subject(RouteReply))
+}
+
+type OwnerPhase {
+  Waiting
+  Delivering(PendingRoute)
+  BetweenWaits
+  Buffered(BufferedRoute)
+}
+
 type Owner {
   Owner(
     token: Int,
     generation: Int,
-    waiting: Bool,
-    pending_route: Option(PendingRoute),
+    phase: OwnerPhase,
     subject: Subject(FlowMessage),
     pid: Pid,
     monitor: Monitor,
@@ -801,6 +833,7 @@ type RegistryMessage {
     key: String,
     token: Int,
     deadline_ms: Int,
+    began: Subject(Nil),
     progress: Subject(RegisterWaitProgress),
     reply_to: Subject(Result(Option(Int), RegistryError)),
   )
@@ -839,73 +872,107 @@ fn handle_registry_message(
 ) -> actor.Next(RegistryState, RegistryMessage) {
   case message {
     Open(key:, worker_subject:, worker_pid:, deadline_ms:, began:, reply_to:) ->
-      case clock.expired(deadline_ms) || !process.is_alive(worker_pid) {
-        True -> {
-          process.send(reply_to, Error(CallTimeout))
-          actor.continue(state)
-        }
+      case process.is_alive(worker_pid) {
         False -> {
-          // Once this marker is visible, replacing the previous owner may be
-          // irreversible even if the acknowledgement misses its deadline.
-          process.send(began, Nil)
-          let state = remove_existing_owner(state, key, True)
-          let token = state.next_token
-          let monitor = process.monitor(worker_pid)
-          let owner =
-            Owner(
-              token:,
-              generation: 0,
-              waiting: True,
-              pending_route: None,
-              subject: worker_subject,
-              pid: worker_pid,
-              monitor:,
-            )
-          process.send(reply_to, Ok(#(token, 0)))
-          actor.continue(RegistryState(
-            owners: dict.insert(state.owners, key, owner),
-            processes: dict.insert(state.processes, worker_pid, key),
-            next_token: token + 1,
-          ))
-        }
-      }
-    RegisterWait(key:, token:, deadline_ms:, progress:, reply_to:) ->
-      case clock.expired(deadline_ms) {
-        True -> {
           process.send(reply_to, Error(CallTimeout))
           actor.continue(state)
         }
-        False ->
+        True ->
+          case
+            begin_registry_mutation(deadline_ms, began)
+            && process.is_alive(worker_pid)
+          {
+            False -> {
+              process.send(reply_to, Error(CallTimeout))
+              actor.continue(state)
+            }
+            True -> {
+              // Once the marker has crossed its authoritative deadline check,
+              // replacing the previous owner is allowed to become irreversible.
+              let state = remove_existing_owner(state, key, True)
+              let token = state.next_token
+              let monitor = process.monitor(worker_pid)
+              let owner =
+                Owner(
+                  token:,
+                  generation: 0,
+                  phase: Waiting,
+                  subject: worker_subject,
+                  pid: worker_pid,
+                  monitor:,
+                )
+              process.send(reply_to, Ok(#(token, 0)))
+              actor.continue(RegistryState(
+                owners: dict.insert(state.owners, key, owner),
+                processes: dict.insert(state.processes, worker_pid, key),
+                next_token: token + 1,
+              ))
+            }
+          }
+      }
+    RegisterWait(key:, token:, deadline_ms:, began:, progress:, reply_to:) ->
+      case begin_registry_mutation(deadline_ms, began) {
+        False -> {
+          process.send(reply_to, Error(CallTimeout))
+          actor.continue(state)
+        }
+        True ->
           case dict.get(state.owners, key) {
             Ok(owner) ->
-              case
-                owner.token == token && process.is_alive(owner.pid),
-                owner.pending_route
-              {
-                True, None -> {
-                  let generation = owner.generation + 1
-                  // This decision marker precedes both the reply and the state
-                  // transition. Since the actor is serial, observing it proves
-                  // the transition will precede the next routed update.
-                  process.send(progress, WaitRegistered(generation))
-                  process.send(reply_to, Ok(Some(generation)))
-                  actor.continue(
-                    RegistryState(
-                      ..state,
-                      owners: dict.insert(
-                        state.owners,
-                        key,
-                        Owner(
-                          ..owner,
-                          generation:,
-                          waiting: True,
-                          pending_route: None,
+              case owner.token == token && process.is_alive(owner.pid) {
+                True ->
+                  case owner.phase {
+                    BetweenWaits -> {
+                      let generation = owner.generation + 1
+                      // This decision marker precedes both the reply and the
+                      // state transition. Since the actor is serial, observing
+                      // it proves the transition precedes the next route.
+                      process.send(progress, WaitRegistered(generation))
+                      process.send(reply_to, Ok(Some(generation)))
+                      actor.continue(
+                        RegistryState(
+                          ..state,
+                          owners: dict.insert(
+                            state.owners,
+                            key,
+                            Owner(..owner, generation:, phase: Waiting),
+                          ),
                         ),
-                      ),
-                    ),
-                  )
-                }
-                _, _ -> {
+                      )
+                    }
+                    Buffered(BufferedRoute(update:, reply_to: route_reply)) -> {
+                      let generation = owner.generation + 1
+                      // Registration atomically claims the bounded buffer for
+                      // this generation. Route ACK remains deferred until this
+                      // exact delivery is dequeued and receipt-accepted.
+                      process.send(progress, WaitRegistered(generation))
+                      process.send(reply_to, Ok(Some(generation)))
+                      actor.send(
+                        owner.subject,
+                        Deliver(token: owner.token, generation:, update:),
+                      )
+                      actor.continue(
+                        RegistryState(
+                          ..state,
+                          owners: dict.insert(
+                            state.owners,
+                            key,
+                            Owner(
+                              ..owner,
+                              generation:,
+                              phase: Delivering(PendingRoute(route_reply)),
+                            ),
+                          ),
+                        ),
+                      )
+                    }
+                    Waiting | Delivering(_) -> {
+                      process.send(progress, WaitOwnerGone)
+                      process.send(reply_to, Ok(None))
+                      actor.continue(state)
+                    }
+                  }
+                False -> {
                   process.send(progress, WaitOwnerGone)
                   process.send(reply_to, Ok(None))
                   actor.continue(state)
@@ -934,18 +1001,18 @@ fn handle_registry_message(
                   actor.continue(state)
                 }
                 True ->
-                  case owner.waiting, owner.pending_route {
-                    False, Some(_) -> {
+                  case owner.phase {
+                    Delivering(_) -> {
                       process.send(progress, WaitDeliveryClaimed)
                       process.send(reply_to, Ok(DeliveryAlreadyClaimed))
                       actor.continue(state)
                     }
-                    False, None -> {
+                    BetweenWaits | Buffered(_) -> {
                       process.send(progress, WaitPauseOwnerGone)
                       process.send(reply_to, Ok(WaitRegistrationGone))
                       actor.continue(state)
                     }
-                    True, _ -> {
+                    Waiting -> {
                       process.send(progress, WaitPaused)
                       process.send(reply_to, Ok(PausedBeforeDelivery))
                       actor.continue(
@@ -954,7 +1021,7 @@ fn handle_registry_message(
                           owners: dict.insert(
                             state.owners,
                             key,
-                            Owner(..owner, waiting: False),
+                            Owner(..owner, phase: BetweenWaits),
                           ),
                         ),
                       )
@@ -989,9 +1056,9 @@ fn handle_registry_message(
                 owner.token == token
                 && owner.generation == generation
                 && owner.pid == worker_pid,
-                owner.pending_route
+                owner.phase
               {
-                True, Some(PendingRoute(route_reply)) -> {
+                True, Delivering(PendingRoute(route_reply)) -> {
                   // This is the exact process-local success boundary: the
                   // matching wait has dequeued Deliver and this serial actor
                   // has accepted its receipt. It does not prove that the user
@@ -1005,7 +1072,7 @@ fn handle_registry_message(
                       owners: dict.insert(
                         state.owners,
                         key,
-                        Owner(..owner, pending_route: None),
+                        Owner(..owner, phase: BetweenWaits),
                       ),
                     ),
                   )
@@ -1037,49 +1104,79 @@ fn handle_registry_message(
     TryRoute(update:, key:, deadline_ms:, began:, reply_to:) ->
       case dict.get(state.owners, key) {
         Ok(owner) ->
-          case owner.waiting && process.is_alive(owner.pid) {
-            True ->
-              case begin_route(deadline_ms, began, reply_to) {
-                False -> actor.continue(state)
-                True -> {
-                  actor.send(
-                    owner.subject,
-                    Deliver(
-                      token: owner.token,
-                      generation: owner.generation,
-                      update:,
-                    ),
-                  )
-                  actor.continue(
-                    RegistryState(
-                      ..state,
-                      owners: dict.insert(
-                        state.owners,
-                        key,
-                        Owner(
-                          ..owner,
-                          waiting: False,
-                          pending_route: Some(PendingRoute(reply_to)),
-                        ),
-                      ),
-                    ),
-                  )
-                }
-              }
+          case process.is_alive(owner.pid) {
             False -> {
-              case owner.pending_route {
-                // A prior Deliver is still ownership-ambiguous. No later
-                // update for this key may escape downstream until its receipt
-                // resolves, including a polling retry of the same update.
-                Some(_) -> process.send(reply_to, RouteAmbiguous)
-                None -> process.send(reply_to, RouteRejected)
-              }
-              case process.is_alive(owner.pid) {
-                True -> actor.continue(state)
-                False ->
-                  actor.continue(remove_existing_owner(state, key, False))
-              }
+              process.send(reply_to, RouteRejected)
+              actor.continue(remove_existing_owner(state, key, False))
             }
+            True ->
+              case owner.phase {
+                Waiting ->
+                  case begin_route(deadline_ms, began, reply_to) {
+                    False -> actor.continue(state)
+                    True -> {
+                      actor.send(
+                        owner.subject,
+                        Deliver(
+                          token: owner.token,
+                          generation: owner.generation,
+                          update:,
+                        ),
+                      )
+                      actor.continue(
+                        RegistryState(
+                          ..state,
+                          owners: dict.insert(
+                            state.owners,
+                            key,
+                            Owner(
+                              ..owner,
+                              phase: Delivering(PendingRoute(reply_to)),
+                            ),
+                          ),
+                        ),
+                      )
+                    }
+                  }
+                BetweenWaits ->
+                  case begin_route(deadline_ms, began, reply_to) {
+                    False -> actor.continue(state)
+                    True ->
+                      actor.continue(
+                        RegistryState(
+                          ..state,
+                          owners: dict.insert(
+                            state.owners,
+                            key,
+                            Owner(
+                              ..owner,
+                              phase: Buffered(BufferedRoute(update:, reply_to:)),
+                            ),
+                          ),
+                        ),
+                      )
+                  }
+                // A prior Deliver is ownership-ambiguous until its receipt.
+                // Retried or concurrent updates must never escape downstream.
+                Delivering(_) ->
+                  case begin_route(deadline_ms, began, reply_to) {
+                    False -> actor.continue(state)
+                    True -> {
+                      process.send(reply_to, RouteAmbiguous)
+                      actor.continue(state)
+                    }
+                  }
+                // Ownership is continuous but bounded to one queued update.
+                // Signal explicit backpressure without claiming this route.
+                Buffered(_) ->
+                  case begin_route(deadline_ms, began, reply_to) {
+                    False -> actor.continue(state)
+                    True -> {
+                      process.send(reply_to, RouteBackpressured)
+                      actor.continue(state)
+                    }
+                  }
+              }
           }
         Error(_) -> {
           process.send(reply_to, RouteRejected)
@@ -1090,7 +1187,7 @@ fn handle_registry_message(
       state.owners
       |> dict.values
       |> list.each(fn(owner) {
-        fail_pending_route_closed(owner)
+        settle_owner_route(owner, False)
         process.kill(owner.pid)
         process.demonitor_process(owner.monitor)
       })
@@ -1116,18 +1213,43 @@ fn begin_route(
 ) -> Bool {
   case clock.expired(deadline_ms) {
     True -> {
-      process.send(reply_to, RouteRejected)
+      // `TryRoute` reached a live owner, so expiry cannot prove that ordinary
+      // middleware owns this update. Preserve continuous ownership fail closed.
+      process.send(reply_to, RouteAmbiguous)
       False
     }
     False -> {
       process.send(began, Nil)
       case clock.expired(deadline_ms) {
         True -> {
-          process.send(reply_to, RouteRejected)
+          process.send(reply_to, RouteAmbiguous)
           False
         }
         False -> True
       }
+    }
+  }
+}
+
+fn begin_registry_mutation(deadline_ms: Int, began: Subject(Nil)) -> Bool {
+  begin_registry_mutation_with(deadline_ms, began, clock.expired)
+}
+
+/// Internal clock seam for deterministic deadline-linearization tests.
+@internal
+pub fn begin_registry_mutation_with(
+  deadline_ms: Int,
+  began: Subject(Nil),
+  is_expired: fn(Int) -> Bool,
+) -> Bool {
+  case is_expired(deadline_ms) {
+    True -> False
+    False -> {
+      // The marker precedes the authoritative second check. If this process is
+      // preempted before sending it, a late resume observes expiry and cannot
+      // mutate after the broker has returned a known-not-started timeout.
+      process.send(began, Nil)
+      !is_expired(deadline_ms)
     }
   }
 }
@@ -1140,7 +1262,7 @@ fn remove_existing_owner(
   case dict.get(state.owners, key) {
     Error(_) -> state
     Ok(owner) -> {
-      fail_pending_route_closed(owner)
+      settle_owner_route(owner, cancel)
       case cancel {
         True -> process.kill(owner.pid)
         False -> Nil
@@ -1155,13 +1277,21 @@ fn remove_existing_owner(
   }
 }
 
-fn fail_pending_route_closed(owner: Owner) -> Nil {
-  case owner.pending_route {
+fn settle_owner_route(owner: Owner, replacement: Bool) -> Nil {
+  case owner.phase {
     // Deliver has already been sent. Without a receipt the registry cannot
     // distinguish an untouched mailbox from a dequeue followed by a crash, so
     // returning False would permit double processing downstream.
-    Some(PendingRoute(reply_to)) -> process.send(reply_to, RouteAmbiguous)
-    None -> Nil
+    Delivering(PendingRoute(reply_to)) -> process.send(reply_to, RouteAmbiguous)
+    // A buffered update has not reached the worker. Normal completion or death
+    // can safely release it downstream. Replacement fails closed because a new
+    // owner for the same key is already being installed in this actor turn.
+    Buffered(BufferedRoute(reply_to:, ..)) ->
+      case replacement {
+        True -> process.send(reply_to, RouteAmbiguous)
+        False -> process.send(reply_to, RouteRejected)
+      }
+    Waiting | BetweenWaits -> Nil
   }
 }
 
@@ -1392,11 +1522,12 @@ fn registry_register_wait_call_from_broker(
   deadline_ms: Int,
 ) -> WaitStateResolution(Option(Int)) {
   let reply = process.new_subject()
+  let began = process.new_subject()
   let progress = process.new_subject()
   let monitor = process.monitor(registry.pid)
   actor.send(
     registry.subject,
-    RegisterWait(key:, token:, deadline_ms:, progress:, reply_to: reply),
+    RegisterWait(key:, token:, deadline_ms:, began:, progress:, reply_to: reply),
   )
   let selector =
     process.new_selector()
@@ -1405,14 +1536,16 @@ fn registry_register_wait_call_from_broker(
   let response =
     process.selector_receive(selector, clock.remaining_ms(deadline_ms))
   let decision = process.receive(progress, 0)
+  let registration_began = process.receive(began, 0) == Ok(Nil)
   process.demonitor_process(monitor)
-  case response, decision {
-    Ok(RegistryReply(result)), _ -> WaitStateResolved(result)
-    Ok(RegistryDown(_)), _ -> WaitStateAmbiguous
-    Error(_), Ok(WaitRegistered(generation)) ->
+  case response, decision, registration_began {
+    Ok(RegistryReply(result)), _, _ -> WaitStateResolved(result)
+    Ok(RegistryDown(_)), _, _ -> WaitStateAmbiguous
+    Error(_), Ok(WaitRegistered(generation)), _ ->
       WaitStateResolved(Ok(Some(generation)))
-    Error(_), Ok(WaitOwnerGone) -> WaitStateResolved(Ok(None))
-    Error(_), Error(_) -> WaitStateResolved(Error(CallTimeout))
+    Error(_), Ok(WaitOwnerGone), _ -> WaitStateResolved(Ok(None))
+    Error(_), Error(_), True -> WaitStateAmbiguous
+    Error(_), Error(_), False -> WaitStateResolved(Error(CallTimeout))
   }
 }
 
@@ -1620,6 +1753,7 @@ fn registry_route_call_from_broker(
     Ok(RegistryReply(RouteAccepted)) -> Ok(True)
     Ok(RegistryReply(RouteRejected)) -> Ok(False)
     Ok(RegistryReply(RouteAmbiguous)) -> Error(RouteOutcomeUnknown)
+    Ok(RegistryReply(RouteBackpressured)) -> Error(RouteBufferFull)
     Ok(RegistryDown(_)) if route_began -> Error(RouteOutcomeUnknown)
     Ok(RegistryDown(_)) -> Error(Stopped)
     Error(_) if route_began -> Error(RouteOutcomeUnknown)

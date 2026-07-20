@@ -19,6 +19,22 @@ fn start_executor(
   executor
 }
 
+fn start_executor_with_job_timeout(
+  max_concurrency: Int,
+  capacity: Int,
+  job_timeout_ms: Int,
+) -> keyed_executor.Executor(String, String) {
+  let assert Ok(executor) =
+    keyed_executor.start_with_options(keyed_executor.Options(
+      max_concurrency:,
+      capacity:,
+      admission_timeout_ms: 1000,
+      job_timeout_ms:,
+      stop_timeout_ms: 1000,
+    ))
+  executor
+}
+
 fn blocking_operation(
   label: String,
   started: process.Subject(#(String, process.Subject(Nil))),
@@ -44,12 +60,18 @@ fn drain(subject: process.Subject(value)) -> Nil {
   }
 }
 
+pub fn default_options_use_a_finite_five_minute_job_deadline_test() {
+  let options = keyed_executor.default_options(1, 1)
+  assert options.job_timeout_ms == 300_000
+}
+
 pub fn process_timeout_boundaries_are_validated_before_start_test() {
   let maximum =
     keyed_executor.Options(
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 4_294_967_295,
+      job_timeout_ms: 4_294_967_295,
       stop_timeout_ms: 4_294_967_295,
     )
   let assert Ok(executor): Result(
@@ -67,6 +89,24 @@ pub fn process_timeout_boundaries_are_validated_before_start_test() {
     )
   assert admission_too_large
     == Error(keyed_executor.InvalidAdmissionTimeout(4_294_967_296))
+
+  let job_too_large: Result(
+    keyed_executor.Executor(String, Nil),
+    keyed_executor.StartError,
+  ) =
+    keyed_executor.start_with_options(
+      keyed_executor.Options(..maximum, job_timeout_ms: 4_294_967_296),
+    )
+  assert job_too_large == Error(keyed_executor.InvalidJobTimeout(4_294_967_296))
+
+  let job_zero: Result(
+    keyed_executor.Executor(String, Nil),
+    keyed_executor.StartError,
+  ) =
+    keyed_executor.start_with_options(
+      keyed_executor.Options(..maximum, job_timeout_ms: 0),
+    )
+  assert job_zero == Error(keyed_executor.InvalidJobTimeout(0))
 
   let stop_too_large: Result(
     keyed_executor.Executor(String, Nil),
@@ -302,6 +342,205 @@ pub fn crashed_job_releases_key_and_next_job_recovers_test() {
   assert keyed_executor.stop(executor) == Ok(Nil)
 }
 
+pub fn queued_time_does_not_consume_job_runtime_deadline_test() {
+  let executor = start_executor_with_job_timeout(1, 3, 200)
+  let first_outcome = process.new_subject()
+  let second_outcome = process.new_subject()
+  let third_outcome = process.new_subject()
+
+  assert keyed_executor.submit(
+      executor,
+      "first",
+      fn() {
+        process.sleep(120)
+        "first"
+      },
+      first_outcome,
+    )
+    == Ok(Nil)
+  assert keyed_executor.submit(
+      executor,
+      "second",
+      fn() {
+        process.sleep(120)
+        "second"
+      },
+      second_outcome,
+    )
+    == Ok(Nil)
+  assert keyed_executor.submit(
+      executor,
+      "third",
+      fn() { "third" },
+      third_outcome,
+    )
+    == Ok(Nil)
+
+  assert helpers.receive_event(first_outcome)
+    == Ok(keyed_executor.Completed("first"))
+  assert helpers.receive_event(second_outcome)
+    == Ok(keyed_executor.Completed("second"))
+  // This job spent longer than its own runtime limit in the queue, but its
+  // deadline starts only when the actual task receives Begin.
+  assert helpers.receive_event(third_outcome)
+    == Ok(keyed_executor.Completed("third"))
+  assert keyed_executor.stop(executor) == Ok(Nil)
+}
+
+pub fn timeout_kills_trap_exits_task_before_terminal_outcome_test() {
+  let executor = start_executor_with_job_timeout(1, 1, 50)
+  let started = process.new_subject()
+  let effects = process.new_subject()
+  let outcome = process.new_subject()
+
+  assert keyed_executor.submit(
+      executor,
+      "chat",
+      fn() {
+        process.trap_exits(True)
+        process.send(started, process.self())
+        emit_forever(effects)
+      },
+      outcome,
+    )
+    == Ok(Nil)
+  let assert Ok(task_pid) = helpers.receive_event(started)
+  let task_monitor = process.monitor(task_pid)
+  let assert Ok(Nil) = helpers.receive_event(effects)
+
+  assert helpers.receive_event(outcome) == Ok(keyed_executor.TimedOut(50))
+  assert !process.is_alive(task_pid)
+  let task_down =
+    process.new_selector()
+    |> process.select_specific_monitor(task_monitor, fn(_) { Nil })
+  assert process.selector_receive(task_down, helpers.async_timeout_ms)
+    == Ok(Nil)
+  process.demonitor_process(task_monitor)
+  drain(effects)
+  process.sleep(20)
+  assert helpers.no_event(effects)
+  assert helpers.no_event(outcome)
+  assert keyed_executor.stop(executor) == Ok(Nil)
+}
+
+pub fn timeout_releases_key_global_slot_and_capacity_test() {
+  let executor = start_executor_with_job_timeout(1, 2, 40)
+  let started = process.new_subject()
+  let timed_out = process.new_subject()
+  let queued = process.new_subject()
+  let after_release = process.new_subject()
+
+  assert keyed_executor.submit(
+      executor,
+      "chat",
+      fn() {
+        process.send(started, Nil)
+        process.sleep_forever()
+        "unreachable"
+      },
+      timed_out,
+    )
+    == Ok(Nil)
+  let assert Ok(Nil) = helpers.receive_event(started)
+  assert keyed_executor.submit(executor, "chat", fn() { "queued" }, queued)
+    == Ok(Nil)
+
+  assert helpers.receive_event(timed_out) == Ok(keyed_executor.TimedOut(40))
+  assert helpers.receive_event(queued) == Ok(keyed_executor.Completed("queued"))
+  assert keyed_executor.submit(
+      executor,
+      "other",
+      fn() { "after-release" },
+      after_release,
+    )
+    == Ok(Nil)
+  assert helpers.receive_event(after_release)
+    == Ok(keyed_executor.Completed("after-release"))
+  assert helpers.no_event(timed_out)
+  assert keyed_executor.stop(executor) == Ok(Nil)
+}
+
+pub fn completion_vs_timeout_has_exactly_one_terminal_outcome_test() {
+  run_completion_timeout_race(20)
+}
+
+fn run_completion_timeout_race(remaining: Int) -> Nil {
+  case remaining <= 0 {
+    True -> Nil
+    False -> {
+      let executor = start_executor_with_job_timeout(1, 1, 20)
+      let started = process.new_subject()
+      let outcome = process.new_subject()
+      assert keyed_executor.submit(
+          executor,
+          "chat",
+          fn() {
+            let release = process.new_subject()
+            process.send(started, release)
+            process.receive_forever(release)
+            "done"
+          },
+          outcome,
+        )
+        == Ok(Nil)
+      let assert Ok(release) = helpers.receive_event(started)
+      let _ =
+        process.spawn_unlinked(fn() {
+          process.sleep(20)
+          process.send(release, Nil)
+        })
+      case helpers.receive_event(outcome) {
+        Ok(keyed_executor.Completed("done"))
+        | Ok(keyed_executor.TimedOut(20)) -> Nil
+        _ -> panic as "expected one completion-or-timeout outcome"
+      }
+      assert helpers.no_event(outcome)
+      assert keyed_executor.stop(executor) == Ok(Nil)
+      run_completion_timeout_race(remaining - 1)
+    }
+  }
+}
+
+pub fn timeout_vs_stop_has_exactly_one_terminal_outcome_test() {
+  run_timeout_stop_race(20)
+}
+
+fn run_timeout_stop_race(remaining: Int) -> Nil {
+  case remaining <= 0 {
+    True -> Nil
+    False -> {
+      let executor = start_executor_with_job_timeout(1, 1, 20)
+      let started = process.new_subject()
+      let outcome = process.new_subject()
+      let stop_result = process.new_subject()
+      assert keyed_executor.submit(
+          executor,
+          "chat",
+          fn() {
+            process.send(started, Nil)
+            process.sleep_forever()
+            "unreachable"
+          },
+          outcome,
+        )
+        == Ok(Nil)
+      let assert Ok(Nil) = helpers.receive_event(started)
+      let _ =
+        process.spawn_unlinked(fn() {
+          process.sleep(20)
+          process.send(stop_result, keyed_executor.stop(executor))
+        })
+      case helpers.receive_event(outcome) {
+        Ok(keyed_executor.TimedOut(20)) | Ok(keyed_executor.Cancelled) -> Nil
+        _ -> panic as "expected one timeout-or-cancellation outcome"
+      }
+      assert helpers.receive_event(stop_result) == Ok(Ok(Nil))
+      assert helpers.no_event(outcome)
+      run_timeout_stop_race(remaining - 1)
+    }
+  }
+}
+
 pub fn stop_cancels_active_and_queued_jobs_and_is_idempotent_test() {
   let executor = start_executor(1, 2)
   let started = process.new_subject()
@@ -502,6 +741,7 @@ pub fn expired_suspended_submission_is_not_admitted_after_resume_test() {
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 30,
+      job_timeout_ms: 1000,
       stop_timeout_ms: 1000,
     )
   let assert Ok(executor): Result(
@@ -535,6 +775,7 @@ pub fn dead_submit_caller_cannot_be_admitted_later_test() {
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 200,
+      job_timeout_ms: 1000,
       stop_timeout_ms: 1000,
     )
   let assert Ok(executor): Result(
@@ -621,6 +862,7 @@ pub fn stop_timeout_forces_termination_and_resolves_the_active_job_test() {
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 1000,
+      job_timeout_ms: 1000,
       stop_timeout_ms: 30,
     )
   let assert Ok(executor): Result(
@@ -656,6 +898,7 @@ pub fn concurrent_forced_stop_callers_converge_on_timeout_test() {
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 1000,
+      job_timeout_ms: 1000,
       stop_timeout_ms: 40,
     )
   let assert Ok(executor): Result(
@@ -688,6 +931,7 @@ pub fn external_kill_during_stop_is_not_misreported_as_timeout_test() {
       max_concurrency: 1,
       capacity: 1,
       admission_timeout_ms: 1000,
+      job_timeout_ms: 1000,
       stop_timeout_ms: 1000,
     )
   let assert Ok(executor): Result(

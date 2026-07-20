@@ -220,16 +220,29 @@ two-phase lifecycle handshake before unlinking and registering it, then the
 worker executes the blocking `wait` flow while polling continues. Tokens and
 wait generations prevent a stale timeout or replaced conversation from
 removing the current waiter. The local `wait` receive and its registry calls
-are bounded separately. Route success follows matching worker dequeue plus a
-registry-accepted receipt, not mailbox enqueue. Mutation and route calls
-distinguish pre-start timeouts from outcome-unknown operations; unknown and
-still-pending routes fail closed. Polling uses `conversations.update_gate` so
-that uncertainty also prevents Telegram offset advancement. The
-lifecycle coordinator cancels orphan starts and exits only after the registry
-and every tracked worker are down, making it the shutdown barrier. An optional
-typed outcome callback observes completion, stop, typed infrastructure failure,
-or crash; explicit stop first offers a short cooperative `Cancelled` path and
-then kills a hung thunk.
+are bounded separately. Ownership remains continuous while the flow computes
+between two waits: the registry holds one update until the next wait is
+registered, and a second update returns typed `RouteBufferFull` backpressure.
+If the flow finishes normally before another wait, the undelivered route is
+rejected so ordinary middleware may resume. Route success follows matching
+worker dequeue plus a registry-accepted receipt, not mailbox enqueue. Mutation
+and route calls distinguish pre-start timeouts from outcome-unknown operations;
+unknown, unresolved, and buffer-full routes fail closed. A routing `CallTimeout`
+also fails closed because an unresponsive registry cannot prove that the key
+has no live owner. Registry death fails closed for the same reason until the
+separate registry-plus-workers shutdown barrier completes. Polling uses
+`conversations.update_gate` so that uncertainty or backpressure also prevents
+Telegram offset advancement. The lifecycle coordinator cancels orphan starts
+and exits only after the registry and every tracked worker are down, making it
+the shutdown barrier. An optional typed outcome callback observes completion,
+stop, typed infrastructure failure, or crash; explicit stop first offers a
+short cooperative `Cancelled` path and then kills a hung thunk.
+
+Open and wait-registration calls put a begin marker before their authoritative
+deadline check. If the actor is preempted between its preliminary check and the
+marker, it cannot mutate on a late resume; if the marker was observed but the
+decision was lost, the worker fails closed instead of continuing under an
+unknown registration state.
 
 These guarantees are process-local. Session atomicity across multiple
 `Storage` handles or BEAM nodes requires backend-native transactions/CAS, and
@@ -245,13 +258,19 @@ the current linear conversations are durable.
 The keyed executor is also process-local. Its scheduler stores FIFO queues per
 key, enforces one active job per key plus a global active limit, and counts both
 running and queued jobs against capacity. Monitored wrappers isolate user
-operations; a per-job arbiter emits one completion, crash, cancellation, or
-executor-termination outcome. Cancellation and executor-termination outcomes
-are held behind the actual user-process `DOWN` barrier, even when that process
-traps exits or the scheduler dies abruptly. Admission deadlines prevent a
-suspended scheduler from accepting stale work after the caller has timed out.
-An unknown admission still requires reconciliation before retry, and accepted
-jobs do not survive process or node loss without application-owned persistence.
+operations; a per-job arbiter emits one completion, crash, timeout,
+cancellation, or executor-termination outcome. Every active job has a finite
+runtime deadline, measured only after its actual `Begin`; queued time is not
+charged. Timeout, cancellation, and executor-termination outcomes are held
+behind the actual user-process `DOWN` barrier, even when that process traps
+exits or the scheduler dies abruptly. A startup worker must register with the
+terminal arbiter before it may create the user task, closing the pre-attachment
+executor-death window. The terminal outcome is published before the scheduler
+releases the key, global slot, and capacity. Admission deadlines
+prevent a suspended scheduler from accepting stale work after the caller has
+timed out. An unknown admission still requires reconciliation before retry,
+and accepted jobs do not survive process or node loss without
+application-owned persistence.
 
 ## File-by-file responsibilities
 

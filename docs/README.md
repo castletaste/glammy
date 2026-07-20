@@ -22,10 +22,11 @@ glammy is a from-scratch port of [grammY](https://github.com/grammyjs/grammY)
 BEAM. The implementation is Gleam plus a small, audited Erlang FFI boundary.
 
 **Status:** 0.1.0. The authoritative quality gates are
-`gleam build --warnings-as-errors`, `gleam test`, `gleam docs build`, the
-compiled consumer project in `examples/echo_bot`, the isolated dependency-floor
-build in `scripts/check_min_deps.sh`, and `gleam export hex-tarball` followed by
-the structural/source-parity verifier and unpacked consumer build. The grammY
+`gleam build --warnings-as-errors`, `gleam test`, the deterministic
+keyed-executor startup-barrier check, `gleam docs build`, the compiled consumer
+project in `examples/echo_bot`, the isolated dependency-floor build in
+`scripts/check_min_deps.sh`, and `gleam export hex-tarball` followed by the
+structural/source-parity verifier and unpacked consumer build. The grammY
 mapping is traceability material, not a claim of line-for-line parity or
 exhaustive behavioural coverage.
 

@@ -92,6 +92,8 @@ jobs:
         run: gleam build --warnings-as-errors
       - name: Test
         run: gleam test
+      - name: Verify keyed-executor startup DOWN barrier
+        run: ./scripts/check_keyed_executor_startup_barrier.sh
       - name: Build documentation
         run: gleam docs build
       - name: Check formatting

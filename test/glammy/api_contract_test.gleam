@@ -391,6 +391,52 @@ pub fn set_webhook_uses_the_shared_validated_secret_test() {
   assert string.contains(payload, "\"secret_token\":\"ABC_secret-123\"")
 }
 
+pub fn set_webhook_certificate_is_an_upload_only_multipart_field_test() {
+  let recorder: process.Subject(#(String, api.Payload)) = process.new_subject()
+  let client =
+    api.new("token")
+    |> api.with_transformer(recording_response(recorder, ok_bool))
+  let assert Ok(url) = https_url.new("https://example.com/hook")
+  let assert Ok(secret) = webhook_secret.new("certificate-secret")
+  let certificate =
+    api.webhook_certificate(
+      <<1, 2, 3>>,
+      "public.pem",
+      Some("application/x-pem-file"),
+    )
+  let options =
+    api.SetWebhookOptions(
+      ip_address: Some("203.0.113.10"),
+      max_connections: Some(20),
+      allowed_updates: Some(["message", "callback_query"]),
+      drop_pending_updates: Some(True),
+      secret_token: Some(secret),
+    )
+
+  assert api.set_webhook_with_certificate(client, url, certificate, options)
+    == Ok(True)
+  let assert Ok(#("setWebhook", api.MultipartPayload(parts))) =
+    helpers.receive_event(recorder)
+  assert parts
+    == [
+      TextPart(name: "url", value: "https://example.com/hook"),
+      FilePart(
+        name: "certificate",
+        filename: "public.pem",
+        content_type: Some("application/x-pem-file"),
+        body: <<1, 2, 3>>,
+      ),
+      TextPart(name: "ip_address", value: "203.0.113.10"),
+      TextPart(name: "max_connections", value: "20"),
+      TextPart(
+        name: "allowed_updates",
+        value: "[\"message\",\"callback_query\"]",
+      ),
+      TextPart(name: "drop_pending_updates", value: "true"),
+      TextPart(name: "secret_token", value: "certificate-secret"),
+    ]
+}
+
 pub fn send_message_uses_typed_modern_options_test() {
   let recorder: process.Subject(#(String, api.Payload)) = process.new_subject()
   let client =

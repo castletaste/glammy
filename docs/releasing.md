@@ -60,6 +60,7 @@ git ls-files --error-unmatch manifest.toml
 test -z "$(git status --porcelain=v1 --untracked-files=all -- manifest.toml)"
 gleam build --warnings-as-errors
 gleam test
+./scripts/check_keyed_executor_startup_barrier.sh
 gleam docs build
 gleam format --check src test examples/echo_bot/src
 git diff --check

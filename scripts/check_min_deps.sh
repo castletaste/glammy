@@ -17,6 +17,8 @@ project_dir="$tmp_dir/project"
 mkdir "$project_dir"
 cp gleam.toml README.md LICENSE "$project_dir/"
 cp -R docs src test "$project_dir/"
+mkdir "$project_dir/scripts"
+cp scripts/check_keyed_executor_startup_barrier.sh "$project_dir/scripts/"
 
 # Gleam package requirements have no equality operator. Pin each declared floor
 # to a single patch by making the upper bound the next patch release. Do not
@@ -74,5 +76,6 @@ cd "$project_dir"
 gleam deps download
 gleam build --warnings-as-errors
 gleam test
+./scripts/check_keyed_executor_startup_barrier.sh
 
 printf '%s\n' "Minimum dependency set OK"

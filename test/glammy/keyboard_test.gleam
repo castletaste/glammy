@@ -75,6 +75,27 @@ pub fn keyboard_supports_different_buttons_test() {
   assert render_reply(k) == expected
 }
 
+pub fn copy_text_validates_telegram_character_bounds_test() {
+  assert keyboard.copy_text("") == Error(keyboard.EmptyCopyText)
+  assert keyboard.copy_text(string.repeat("x", 257))
+    == Error(keyboard.CopyTextTooLong(257))
+
+  let assert Ok(maximum) = keyboard.copy_text(string.repeat("x", 256))
+  assert keyboard.copy_text_value(maximum) == string.repeat("x", 256)
+}
+
+pub fn reply_button_appearance_has_exact_payload_test() {
+  let decorated =
+    keyboard.ReplyRequestContact(text: "Share")
+    |> keyboard.reply_button_style(keyboard.Success)
+    |> keyboard.reply_button_icon_custom_emoji("emoji-reply")
+  let rendered =
+    keyboard.reply() |> keyboard.reply_button(decorated) |> render_reply
+
+  assert rendered
+    == "{\"keyboard\":[[{\"text\":\"Share\",\"request_contact\":true,\"style\":\"success\",\"icon_custom_emoji_id\":\"emoji-reply\"}]]}"
+}
+
 pub fn keyboard_supports_reply_markup_options_test() {
   let k =
     keyboard.reply()
@@ -282,6 +303,19 @@ pub fn inline_supports_different_buttons_test() {
   let assert False = string_contains(rendered, "\"pay\":true")
 }
 
+pub fn inline_copy_and_appearance_have_exact_payload_test() {
+  let assert Ok(value) = keyboard.copy_text("secret value")
+  let copy_button =
+    keyboard.InlineCopy(text: "Copy", copy_text: value)
+    |> keyboard.inline_button_style(keyboard.Primary)
+    |> keyboard.inline_button_icon_custom_emoji("emoji-inline")
+  let rendered =
+    keyboard.inline() |> keyboard.inline_button(copy_button) |> render_inline
+
+  assert rendered
+    == "{\"inline_keyboard\":[[{\"text\":\"Copy\",\"copy_text\":{\"text\":\"secret value\"},\"style\":\"primary\",\"icon_custom_emoji_id\":\"emoji-inline\"}]]}"
+}
+
 pub fn game_inline_keyboard_keeps_special_button_first_test() {
   let trailing =
     keyboard.inline()
@@ -317,6 +351,28 @@ pub fn endpoint_inline_keyboards_can_contain_only_special_button_test() {
     |> keyboard.invoice_inline_keyboard_to_json
     |> json.to_string
     == "{\"inline_keyboard\":[[{\"text\":\"pay\",\"pay\":true}]]}"
+}
+
+pub fn endpoint_button_appearance_keeps_special_actions_first_test() {
+  let assert Ok(copy_value) = keyboard.copy_text("receipt")
+  let trailing = keyboard.inline() |> keyboard.inline_copy("copy", copy_value)
+  let game =
+    keyboard.game_inline_keyboard_with("play", trailing)
+    |> keyboard.game_button_style(keyboard.Danger)
+    |> keyboard.game_button_icon_custom_emoji("emoji-game")
+    |> keyboard.game_inline_keyboard_to_json
+    |> json.to_string
+  assert game
+    == "{\"inline_keyboard\":[[{\"text\":\"play\",\"callback_game\":{},\"style\":\"danger\",\"icon_custom_emoji_id\":\"emoji-game\"}],[{\"text\":\"copy\",\"copy_text\":{\"text\":\"receipt\"}}]]}"
+
+  let invoice =
+    keyboard.invoice_inline_keyboard_with("pay", trailing)
+    |> keyboard.invoice_button_style(keyboard.Success)
+    |> keyboard.invoice_button_icon_custom_emoji("emoji-pay")
+    |> keyboard.invoice_inline_keyboard_to_json
+    |> json.to_string
+  assert invoice
+    == "{\"inline_keyboard\":[[{\"text\":\"pay\",\"pay\":true,\"style\":\"success\",\"icon_custom_emoji_id\":\"emoji-pay\"}],[{\"text\":\"copy\",\"copy_text\":{\"text\":\"receipt\"}}]]}"
 }
 
 pub fn inline_can_be_transposed_test() {

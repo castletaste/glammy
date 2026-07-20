@@ -30,6 +30,8 @@ const default_stop_timeout_ms = 5000
 
 const default_admission_timeout_ms = 5000
 
+const default_job_timeout_ms = 300_000
+
 const actor_initialisation_timeout_ms = 1000
 
 const forced_stop_confirmation_timeout_ms = 1000
@@ -44,6 +46,9 @@ pub type Options {
     /// Maximum time to obtain a linearized in-memory admission decision.
     /// Must be within BEAM's `1..4_294_967_295` millisecond range.
     admission_timeout_ms: Int,
+    /// Maximum runtime of an active job, measured from its actual `Begin`.
+    /// Must be within BEAM's `1..4_294_967_295` millisecond range.
+    job_timeout_ms: Int,
     /// Maximum time `stop` waits before forcefully terminating the executor.
     /// Must be within BEAM's `1..4_294_967_295` millisecond range.
     stop_timeout_ms: Int,
@@ -56,6 +61,7 @@ pub type StartError {
   InvalidCapacity(Int)
   CapacityBelowConcurrency(capacity: Int, max_concurrency: Int)
   InvalidAdmissionTimeout(Int)
+  InvalidJobTimeout(Int)
   InvalidStopTimeout(Int)
   StartFailed(String)
 }
@@ -81,6 +87,10 @@ pub type JobOutcome(result) {
   Completed(result)
   /// The operation panicked, threw, exited, or otherwise failed to report.
   Crashed(class: String, value: String, stacktrace: String)
+  /// The runtime deadline expired. The actual user-operation process is
+  /// confirmed down before this is observable. External effects that happened
+  /// before termination may still have occurred.
+  TimedOut(timeout_ms: Int)
   /// Shutdown won the scheduler race before completion was committed. This is
   /// not observable until the actual user-operation process is confirmed down.
   Cancelled
@@ -133,6 +143,7 @@ type ExecutorState(key, result) {
     subject: Subject(ExecutorMessage(key, result)),
     max_concurrency: Int,
     capacity: Int,
+    job_timeout_ms: Int,
     accepted: Int,
     pending: Dict(key, Fifo(Job(key, result))),
     ready_keys: Fifo(key),
@@ -165,18 +176,25 @@ type ExecutorMessage(key, result) {
 
 type OutcomeGuardMessage(result) {
   Accept
+  RegisterWorker(worker_pid: Pid, reply_to: Subject(Nil))
   AttachTask(task_pid: Pid, reply_to: Subject(Nil))
-  Deliver(JobOutcome(result))
+  Deliver(outcome: JobOutcome(result), reply_to: Subject(Nil))
   Dismiss
 }
 
 type OutcomeGuardEvent(result) {
   GuardAccepted
+  GuardWorkerRegistered(worker_pid: Pid, reply_to: Subject(Nil))
   GuardTaskAttached(task_pid: Pid, reply_to: Subject(Nil))
-  GuardDelivery(JobOutcome(result))
+  GuardDelivery(outcome: JobOutcome(result), reply_to: Subject(Nil))
   GuardDismissed
   GuardExecutorDown(process.Down)
+  GuardWorkerDown(process.Down)
   GuardTaskDown(process.Down)
+}
+
+type GuardWorker {
+  GuardWorker(pid: Pid, monitor: Monitor, down: Bool)
 }
 
 type OutcomeGuardStartEvent(result) {
@@ -192,17 +210,19 @@ type Fifo(value) {
   Fifo(front: List(value), back: List(value))
 }
 
-/// Build options with the default five-second stop deadline.
+/// Build options with a five-minute job deadline and five-second admission and
+/// stop deadlines.
 pub fn default_options(max_concurrency: Int, capacity: Int) -> Options {
   Options(
     max_concurrency:,
     capacity:,
     admission_timeout_ms: default_admission_timeout_ms,
+    job_timeout_ms: default_job_timeout_ms,
     stop_timeout_ms: default_stop_timeout_ms,
   )
 }
 
-/// Start a keyed executor with the default stop deadline.
+/// Start a keyed executor with the default finite lifecycle deadlines.
 pub fn start(
   max_concurrency: Int,
   capacity: Int,
@@ -225,6 +245,7 @@ pub fn start_with_options(
         subject:,
         max_concurrency: options.max_concurrency,
         capacity: options.capacity,
+        job_timeout_ms: options.job_timeout_ms,
         accepted: 0,
         pending: dict.new(),
         ready_keys: fifo_new(),
@@ -279,9 +300,16 @@ fn validate_options(options: Options) -> Result(Nil, StartError) {
                 False ->
                   Error(InvalidAdmissionTimeout(options.admission_timeout_ms))
                 True ->
-                  case clock.is_valid_process_timeout(options.stop_timeout_ms) {
-                    True -> Ok(Nil)
-                    False -> Error(InvalidStopTimeout(options.stop_timeout_ms))
+                  case clock.is_valid_process_timeout(options.job_timeout_ms) {
+                    False -> Error(InvalidJobTimeout(options.job_timeout_ms))
+                    True ->
+                      case
+                        clock.is_valid_process_timeout(options.stop_timeout_ms)
+                      {
+                        True -> Ok(Nil)
+                        False ->
+                          Error(InvalidStopTimeout(options.stop_timeout_ms))
+                      }
                   }
               }
           }
@@ -734,37 +762,66 @@ fn dispatch_available(
                 True -> dict.delete(state.pending, key)
                 False -> dict.insert(state.pending, key, remaining)
               }
-              let WorkerHandle(worker_pid:, task_pid:, begin:) =
+              case
                 start_worker(
                   state.subject,
                   process.self(),
                   job.operation,
                   job.outcome_guard,
                 )
-              let worker_monitor = process.monitor(worker_pid)
-              let task_monitor = process.monitor(task_pid)
-              let running_job =
-                RunningJob(
-                  job:,
-                  task_pid:,
-                  worker_monitor:,
-                  task_monitor:,
-                  reported: None,
-                  worker_down: None,
-                  task_down: None,
-                )
-              let state =
-                ExecutorState(
-                  ..state,
-                  pending:,
-                  ready_keys:,
-                  active_keys: dict.insert(state.active_keys, key, worker_pid),
-                  running: dict.insert(state.running, worker_pid, running_job),
-                  tasks: dict.insert(state.tasks, task_pid, worker_pid),
-                )
-              process.send(begin, Begin)
-              state
-              |> dispatch_available
+              {
+                Error(outcome) -> {
+                  // The accepted job failed before a running handle existed.
+                  // Publish its guarded terminal outcome, release capacity,
+                  // and keep this key eligible for its remaining FIFO tail.
+                  deliver_outcome(job.outcome_guard, outcome)
+                  let ready_keys = case dict.has_key(pending, key) {
+                    True -> fifo_push(ready_keys, key)
+                    False -> ready_keys
+                  }
+                  ExecutorState(
+                    ..state,
+                    accepted: state.accepted - 1,
+                    pending:,
+                    ready_keys:,
+                  )
+                  |> dispatch_available
+                }
+                Ok(WorkerHandle(worker_pid:, task_pid:, begin:)) -> {
+                  let worker_monitor = process.monitor(worker_pid)
+                  let task_monitor = process.monitor(task_pid)
+                  let running_job =
+                    RunningJob(
+                      job:,
+                      task_pid:,
+                      worker_monitor:,
+                      task_monitor:,
+                      reported: None,
+                      worker_down: None,
+                      task_down: None,
+                    )
+                  let state =
+                    ExecutorState(
+                      ..state,
+                      pending:,
+                      ready_keys:,
+                      active_keys: dict.insert(
+                        state.active_keys,
+                        key,
+                        worker_pid,
+                      ),
+                      running: dict.insert(
+                        state.running,
+                        worker_pid,
+                        running_job,
+                      ),
+                      tasks: dict.insert(state.tasks, task_pid, worker_pid),
+                    )
+                  process.send(begin, Begin(state.job_timeout_ms))
+                  state
+                  |> dispatch_available
+                }
+              }
             }
           }
       }
@@ -871,7 +928,7 @@ fn finish_running_if_down(
           }
           // Both the supervisor and the actual user-code process are confirmed
           // DOWN before any terminal outcome or key release is observable.
-          process.send(running_job.job.outcome_guard, Deliver(outcome))
+          deliver_outcome(running_job.job.outcome_guard, outcome)
           let pending_has_key = dict.has_key(state.pending, running_job.job.key)
           let ready_keys = case state.stopping || !pending_has_key {
             True -> state.ready_keys
@@ -908,7 +965,7 @@ fn handle_stop(
     False -> {
       let queued = pending_jobs(state.pending)
       list.each(queued, fn(job) {
-        process.send(job.outcome_guard, Deliver(Cancelled))
+        deliver_outcome(job.outcome_guard, Cancelled)
       })
       dict.to_list(state.running)
       |> list.each(fn(entry) {
@@ -965,15 +1022,17 @@ fn start_outcome_guard(
         |> process.select_map(subject, fn(message) {
           case message {
             Accept -> GuardAccepted
+            RegisterWorker(worker_pid:, reply_to:) ->
+              GuardWorkerRegistered(worker_pid:, reply_to:)
             AttachTask(task_pid:, reply_to:) ->
               GuardTaskAttached(task_pid:, reply_to:)
-            Deliver(outcome) -> GuardDelivery(outcome)
+            Deliver(outcome:, reply_to:) -> GuardDelivery(outcome:, reply_to:)
             Dismiss -> GuardDismissed
           }
         })
         |> process.select_specific_monitor(monitor, GuardExecutorDown)
       process.send(ready, subject)
-      run_outcome_guard(selector, monitor, target, False, None)
+      run_outcome_guard(selector, monitor, target, False, False, None, None)
     })
   let guard_monitor = process.monitor(guard_pid)
   let selector =
@@ -994,60 +1053,203 @@ fn start_outcome_guard(
 
 fn run_outcome_guard(
   selector: process.Selector(OutcomeGuardEvent(result)),
-  monitor: Monitor,
+  executor_monitor: Monitor,
   target: Subject(JobOutcome(result)),
   accepted: Bool,
+  executor_down: Bool,
+  worker: Option(GuardWorker),
   task: Option(GuardTask),
 ) -> Nil {
   case process.selector_receive_forever(selector) {
-    GuardAccepted -> run_outcome_guard(selector, monitor, target, True, task)
+    GuardAccepted ->
+      run_outcome_guard(
+        selector,
+        executor_monitor,
+        target,
+        True,
+        executor_down,
+        worker,
+        task,
+      )
+    GuardWorkerRegistered(worker_pid:, reply_to:) -> {
+      let worker_monitor = process.monitor(worker_pid)
+      let selector =
+        process.select_specific_monitor(
+          selector,
+          worker_monitor,
+          GuardWorkerDown,
+        )
+      // A worker cannot create the user task until this monitor is installed.
+      // Therefore executor DOWN may publish immediately only when no worker
+      // has crossed this acknowledgement barrier.
+      process.send(reply_to, Nil)
+      run_outcome_guard(
+        selector,
+        executor_monitor,
+        target,
+        accepted,
+        executor_down,
+        Some(GuardWorker(worker_pid, worker_monitor, False)),
+        task,
+      )
+    }
     GuardTaskAttached(task_pid:, reply_to:) -> {
       let task_monitor = process.monitor(task_pid)
       let selector =
         process.select_specific_monitor(selector, task_monitor, GuardTaskDown)
       process.send(reply_to, Nil)
+      case executor_down {
+        True -> process.kill(task_pid)
+        False -> Nil
+      }
       run_outcome_guard(
         selector,
-        monitor,
+        executor_monitor,
         target,
         accepted,
+        executor_down,
+        worker,
         Some(GuardTask(task_pid, task_monitor, False)),
       )
     }
+    GuardWorkerDown(_) ->
+      case worker {
+        None ->
+          run_outcome_guard(
+            selector,
+            executor_monitor,
+            target,
+            accepted,
+            executor_down,
+            worker,
+            task,
+          )
+        Some(GuardWorker(pid:, monitor: worker_monitor, ..)) -> {
+          let worker = Some(GuardWorker(pid, worker_monitor, True))
+          case executor_down {
+            True ->
+              finish_guard_after_executor_down(
+                executor_monitor,
+                target,
+                accepted,
+                worker,
+                task,
+              )
+            False ->
+              run_outcome_guard(
+                selector,
+                executor_monitor,
+                target,
+                accepted,
+                executor_down,
+                worker,
+                task,
+              )
+          }
+        }
+      }
     GuardTaskDown(_) ->
       case task {
-        None -> run_outcome_guard(selector, monitor, target, accepted, task)
+        None ->
+          run_outcome_guard(
+            selector,
+            executor_monitor,
+            target,
+            accepted,
+            executor_down,
+            worker,
+            task,
+          )
         Some(GuardTask(pid:, monitor: task_monitor, ..)) ->
           run_outcome_guard(
             selector,
-            monitor,
+            executor_monitor,
             target,
             accepted,
+            executor_down,
+            worker,
             Some(GuardTask(pid, task_monitor, True)),
           )
       }
     GuardDismissed -> {
       ensure_guard_task_down(task, True)
-      process.demonitor_process(monitor)
+      ensure_guard_worker_down(worker)
+      process.demonitor_process(executor_monitor)
     }
-    GuardDelivery(outcome) -> {
+    GuardDelivery(outcome:, reply_to:) -> {
       ensure_guard_task_down(task, False)
-      process.demonitor_process(monitor)
+      ensure_guard_worker_down(worker)
+      process.demonitor_process(executor_monitor)
       case accepted {
         True -> process.send(target, outcome)
         False -> Nil
       }
+      process.send(reply_to, Nil)
     }
     GuardExecutorDown(_) -> {
-      // On abrupt scheduler death the outcome is not observable until the
-      // actual user-code process is hard-dead. This is the terminal arbiter.
-      ensure_guard_task_down(task, True)
-      case accepted {
-        True -> process.send(target, ExecutorTerminated)
-        False -> Nil
+      case worker {
+        // A worker must register and be monitored before it may create the
+        // task. If no worker crossed that barrier, no user process can start
+        // after this outcome even when a late registration message exists.
+        None ->
+          finish_guard_after_executor_down(
+            executor_monitor,
+            target,
+            accepted,
+            worker,
+            task,
+          )
+        Some(GuardWorker(down: True, ..)) ->
+          finish_guard_after_executor_down(
+            executor_monitor,
+            target,
+            accepted,
+            worker,
+            task,
+          )
+        Some(_) ->
+          // The registered worker owns the startup race and confirms any task
+          // down before it exits. Keep serving AttachTask while awaiting its
+          // monitor rather than publishing a premature terminal outcome.
+          run_outcome_guard(
+            selector,
+            executor_monitor,
+            target,
+            accepted,
+            True,
+            worker,
+            task,
+          )
       }
     }
   }
+}
+
+fn finish_guard_after_executor_down(
+  executor_monitor: Monitor,
+  target: Subject(JobOutcome(result)),
+  accepted: Bool,
+  worker: Option(GuardWorker),
+  task: Option(GuardTask),
+) -> Nil {
+  // A registered worker exits only after its task is down. The direct task
+  // monitor remains the final defence against a wrapper protocol failure.
+  ensure_guard_task_down(task, True)
+  ensure_guard_worker_down(worker)
+  process.demonitor_process(executor_monitor)
+  case accepted {
+    True -> process.send(target, ExecutorTerminated)
+    False -> Nil
+  }
+}
+
+fn deliver_outcome(
+  guard: Subject(OutcomeGuardMessage(result)),
+  outcome: JobOutcome(result),
+) -> Nil {
+  let delivered = process.new_subject()
+  process.send(guard, Deliver(outcome:, reply_to: delivered))
+  process.receive_forever(delivered)
 }
 
 fn ensure_guard_task_down(task: Option(GuardTask), kill: Bool) -> Nil {
@@ -1069,12 +1271,36 @@ fn ensure_guard_task_down(task: Option(GuardTask), kill: Bool) -> Nil {
   }
 }
 
+fn ensure_guard_worker_down(worker: Option(GuardWorker)) -> Nil {
+  case worker {
+    None -> Nil
+    Some(GuardWorker(monitor:, down: True, ..)) ->
+      process.demonitor_process(monitor)
+    Some(GuardWorker(monitor:, down: False, ..)) -> {
+      let selector =
+        process.new_selector()
+        |> process.select_specific_monitor(monitor, fn(_) { Nil })
+      let _ = process.selector_receive_forever(selector)
+      process.demonitor_process(monitor)
+    }
+  }
+}
+
 type TaskReport(result) {
-  TaskReport(outcome: JobOutcome(result), reply_to: Subject(Nil))
+  TaskReport(
+    outcome: JobOutcome(result),
+    finished_ms: Int,
+    reply_to: Subject(Nil),
+  )
+}
+
+type TaskEvent(result) {
+  TaskBegan(deadline_ms: Int, timeout_ms: Int)
+  TaskFinished(TaskReport(result))
 }
 
 type TaskControl {
-  Begin
+  Begin(timeout_ms: Int)
 }
 
 type TaskStarted {
@@ -1086,15 +1312,23 @@ type WorkerHandle {
 }
 
 type WorkerEvent(result) {
+  WorkerTaskBegan(deadline_ms: Int, timeout_ms: Int)
   WorkerTaskReport(TaskReport(result))
   WorkerTaskDown(process.Down)
   WorkerExecutorDown(process.Down)
 }
 
 type WorkerStartEvent {
+  WorkerGuardRegistered(Nil)
   WorkerGuardAttached(Nil)
+  WorkerTaskStarted(TaskStarted)
   WorkerStartTaskDown(process.Down)
   WorkerStartExecutorDown(process.Down)
+}
+
+type WorkerReadyEvent {
+  WorkerReady(WorkerHandle)
+  WorkerStartupDown(process.Down)
 }
 
 type WorkerReportAck {
@@ -1107,82 +1341,192 @@ fn start_worker(
   executor_pid: Pid,
   operation: fn() -> result,
   outcome_guard: Subject(OutcomeGuardMessage(result)),
-) -> WorkerHandle {
+) -> Result(WorkerHandle, JobOutcome(result)) {
   let ready: Subject(WorkerHandle) = process.new_subject()
-  let _ =
+  let worker_pid =
     process.spawn_unlinked(fn() {
       process.trap_exits(True)
       let executor_monitor = process.monitor(executor_pid)
-      let reports = process.new_subject()
-      let task_started = process.new_subject()
-      let task_pid =
-        process.spawn(fn() { run_task(operation, reports, task_started) })
-      let task_monitor = process.monitor(task_pid)
-      let TaskStarted(begin:, ..) = process.receive_forever(task_started)
-
-      // The outcome arbiter learns and monitors the true task pid before the
-      // scheduler can release `Begin`, closing abrupt-death terminal races.
-      let attached = process.new_subject()
+      // The guard monitors this startup worker before it acknowledges. No user
+      // task is created before that barrier, so executor death either wins
+      // before any task exists or waits for this worker's DOWN confirmation.
+      let registered = process.new_subject()
       process.send(
         outcome_guard,
-        AttachTask(task_pid: task_pid, reply_to: attached),
+        RegisterWorker(worker_pid: process.self(), reply_to: registered),
       )
       let start_selector =
         process.new_selector()
-        |> process.select_map(attached, WorkerGuardAttached)
-        |> process.select_specific_monitor(task_monitor, WorkerStartTaskDown)
+        |> process.select_map(registered, WorkerGuardRegistered)
         |> process.select_specific_monitor(
           executor_monitor,
           WorkerStartExecutorDown,
         )
-      let handle = WorkerHandle(process.self(), task_pid, begin)
       case process.selector_receive_forever(start_selector) {
-        WorkerGuardAttached(Nil) -> {
-          process.send(ready, handle)
-          let selector =
-            process.new_selector()
-            |> process.select_map(reports, WorkerTaskReport)
-            |> process.select_specific_monitor(task_monitor, WorkerTaskDown)
-            |> process.select_specific_monitor(
-              executor_monitor,
-              WorkerExecutorDown,
-            )
-          observe_task(
-            selector,
+        WorkerGuardRegistered(Nil) ->
+          run_registered_worker(
+            ready,
             executor_subject,
             executor_monitor,
-            task_pid,
-            None,
+            operation,
+            outcome_guard,
           )
-        }
-        WorkerStartTaskDown(down) -> {
-          process.send(ready, handle)
-          report_worker_outcome(
-            executor_subject,
-            executor_monitor,
-            crash_from_exit(down_reason(down)),
-          )
-        }
         WorkerStartExecutorDown(_) -> {
-          process.kill(task_pid)
-          wait_for_task_down(task_monitor)
+          process.demonitor_process(executor_monitor)
         }
+        WorkerGuardAttached(_) | WorkerStartTaskDown(_) -> Nil
+        WorkerTaskStarted(_) -> Nil
       }
     })
-  process.receive_forever(ready)
+  let worker_monitor = process.monitor(worker_pid)
+  let selector =
+    process.new_selector()
+    |> process.select_map(ready, WorkerReady)
+    |> process.select_specific_monitor(worker_monitor, WorkerStartupDown)
+  let result = case process.selector_receive_forever(selector) {
+    WorkerReady(handle) -> Ok(handle)
+    WorkerStartupDown(down) -> Error(crash_from_exit(down_reason(down)))
+  }
+  process.demonitor_process(worker_monitor)
+  result
+}
+
+fn run_registered_worker(
+  ready: Subject(WorkerHandle),
+  executor_subject: Subject(ExecutorMessage(key, result)),
+  executor_monitor: Monitor,
+  operation: fn() -> result,
+  outcome_guard: Subject(OutcomeGuardMessage(result)),
+) -> Nil {
+  let reports = process.new_subject()
+  let task_started = process.new_subject()
+  let task_pid =
+    process.spawn(fn() { run_task(operation, reports, task_started) })
+  let task_monitor = process.monitor(task_pid)
+  let fallback_begin = process.new_subject()
+  let fallback_handle = WorkerHandle(process.self(), task_pid, fallback_begin)
+  let start_selector =
+    process.new_selector()
+    |> process.select_map(task_started, WorkerTaskStarted)
+    |> process.select_specific_monitor(task_monitor, WorkerStartTaskDown)
+    |> process.select_specific_monitor(
+      executor_monitor,
+      WorkerStartExecutorDown,
+    )
+  case process.selector_receive_forever(start_selector) {
+    WorkerTaskStarted(TaskStarted(begin:, ..)) ->
+      attach_registered_task(
+        ready,
+        executor_subject,
+        executor_monitor,
+        reports,
+        outcome_guard,
+        task_pid,
+        task_monitor,
+        begin,
+      )
+    WorkerStartTaskDown(down) -> {
+      // Return a handle even when the task died before publishing its own
+      // Begin subject. The scheduler can then linearize the accepted job while
+      // this worker reports the startup crash; the fallback subject is never
+      // consumed by user code.
+      process.send(ready, fallback_handle)
+      report_worker_outcome(
+        executor_subject,
+        executor_monitor,
+        crash_from_exit(down_reason(down)),
+      )
+    }
+    WorkerStartExecutorDown(_) -> {
+      process.kill(task_pid)
+      wait_for_task_down(task_monitor)
+    }
+    WorkerGuardRegistered(_) | WorkerGuardAttached(_) -> Nil
+  }
+}
+
+fn attach_registered_task(
+  ready: Subject(WorkerHandle),
+  executor_subject: Subject(ExecutorMessage(key, result)),
+  executor_monitor: Monitor,
+  reports: Subject(TaskEvent(result)),
+  outcome_guard: Subject(OutcomeGuardMessage(result)),
+  task_pid: Pid,
+  task_monitor: Monitor,
+  begin: Subject(TaskControl),
+) -> Nil {
+  // The outcome arbiter learns and monitors the true task pid before the
+  // scheduler can release `Begin`, closing abrupt-death terminal races.
+  let attached = process.new_subject()
+  process.send(
+    outcome_guard,
+    AttachTask(task_pid: task_pid, reply_to: attached),
+  )
+  let start_selector =
+    process.new_selector()
+    |> process.select_map(attached, WorkerGuardAttached)
+    |> process.select_specific_monitor(task_monitor, WorkerStartTaskDown)
+    |> process.select_specific_monitor(
+      executor_monitor,
+      WorkerStartExecutorDown,
+    )
+  let handle = WorkerHandle(process.self(), task_pid, begin)
+  case process.selector_receive_forever(start_selector) {
+    WorkerGuardAttached(Nil) -> {
+      process.send(ready, handle)
+      let selector =
+        process.new_selector()
+        |> process.select_map(reports, fn(event) {
+          case event {
+            TaskBegan(deadline_ms:, timeout_ms:) ->
+              WorkerTaskBegan(deadline_ms:, timeout_ms:)
+            TaskFinished(report) -> WorkerTaskReport(report)
+          }
+        })
+        |> process.select_specific_monitor(task_monitor, WorkerTaskDown)
+        |> process.select_specific_monitor(executor_monitor, WorkerExecutorDown)
+      observe_task(
+        selector,
+        executor_subject,
+        executor_monitor,
+        task_pid,
+        None,
+        None,
+      )
+    }
+    WorkerStartTaskDown(down) -> {
+      process.send(ready, handle)
+      report_worker_outcome(
+        executor_subject,
+        executor_monitor,
+        crash_from_exit(down_reason(down)),
+      )
+    }
+    WorkerStartExecutorDown(_) -> {
+      process.kill(task_pid)
+      wait_for_task_down(task_monitor)
+    }
+    WorkerGuardRegistered(_) | WorkerTaskStarted(_) -> Nil
+  }
 }
 
 fn run_task(
   operation: fn() -> result,
-  reports: Subject(TaskReport(result)),
+  reports: Subject(TaskEvent(result)),
   started: Subject(TaskStarted),
 ) -> Nil {
   let begin = process.new_subject()
   process.send(started, TaskStarted(process.self(), begin))
-  let Begin = process.receive_forever(begin)
+  let Begin(timeout_ms) = process.receive_forever(begin)
+  let deadline_ms = clock.deadline_after(timeout_ms)
+  process.send(reports, TaskBegan(deadline_ms:, timeout_ms:))
   let outcome = safely_run(operation)
+  let finished_ms = clock.now_ms()
   let reply = process.new_subject()
-  process.send(reports, TaskReport(outcome:, reply_to: reply))
+  process.send(
+    reports,
+    TaskFinished(TaskReport(outcome:, finished_ms:, reply_to: reply)),
+  )
   process.receive_forever(reply)
 }
 
@@ -1209,29 +1553,70 @@ fn observe_task(
   executor_subject: Subject(ExecutorMessage(key, result)),
   executor_monitor: Monitor,
   task_pid: Pid,
+  runtime_deadline: Option(#(Int, Int)),
   reported: Option(JobOutcome(result)),
 ) -> Nil {
-  case process.selector_receive_forever(selector) {
-    WorkerTaskReport(TaskReport(outcome:, reply_to:)) -> {
-      process.send(reply_to, Nil)
+  let event = case runtime_deadline, reported {
+    Some(#(deadline_ms, _)), None ->
+      process.selector_receive(
+        selector,
+        within: clock.remaining_ms(deadline_ms),
+      )
+    _, _ -> Ok(process.selector_receive_forever(selector))
+  }
+  case event {
+    Ok(WorkerTaskBegan(deadline_ms:, timeout_ms:)) ->
       observe_task(
         selector,
         executor_subject,
         executor_monitor,
         task_pid,
-        Some(outcome),
+        Some(#(deadline_ms, timeout_ms)),
+        reported,
       )
+    Ok(WorkerTaskReport(TaskReport(outcome:, finished_ms:, reply_to:))) -> {
+      process.send(reply_to, Nil)
+      case runtime_deadline {
+        Some(#(deadline_ms, timeout_ms)) if finished_ms >= deadline_ms -> {
+          process.kill(task_pid)
+          wait_for_worker_task_down(selector)
+          report_worker_outcome(
+            executor_subject,
+            executor_monitor,
+            TimedOut(timeout_ms),
+          )
+        }
+        _ ->
+          observe_task(
+            selector,
+            executor_subject,
+            executor_monitor,
+            task_pid,
+            runtime_deadline,
+            Some(outcome),
+          )
+      }
     }
-    WorkerTaskDown(down) -> {
+    Ok(WorkerTaskDown(down)) -> {
       let outcome = case reported {
         Some(outcome) -> outcome
         None -> crash_from_exit(down_reason(down))
       }
       report_worker_outcome(executor_subject, executor_monitor, outcome)
     }
-    WorkerExecutorDown(_) -> {
+    Ok(WorkerExecutorDown(_)) -> {
       process.kill(task_pid)
       wait_for_worker_task_down(selector)
+    }
+    Error(Nil) -> {
+      let assert Some(#(_, timeout_ms)) = runtime_deadline
+      process.kill(task_pid)
+      wait_for_worker_task_down(selector)
+      report_worker_outcome(
+        executor_subject,
+        executor_monitor,
+        TimedOut(timeout_ms),
+      )
     }
   }
 }
@@ -1240,6 +1625,7 @@ fn wait_for_worker_task_down(
   selector: process.Selector(WorkerEvent(result)),
 ) -> Nil {
   case process.selector_receive_forever(selector) {
+    WorkerTaskBegan(..) -> wait_for_worker_task_down(selector)
     WorkerTaskReport(TaskReport(reply_to:, ..)) -> {
       process.send(reply_to, Nil)
       wait_for_worker_task_down(selector)

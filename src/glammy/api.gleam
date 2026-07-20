@@ -531,6 +531,65 @@ pub fn set_webhook(
   call(api, "setWebhook", fields, decode.bool)
 }
 
+/// A public-key certificate that is always uploaded as multipart bytes.
+///
+/// Telegram explicitly rejects a file identifier or URL for this field, so
+/// this type deliberately cannot represent either of those `InputFile` forms.
+pub opaque type WebhookCertificate {
+  WebhookCertificate(
+    bytes: BitArray,
+    filename: String,
+    mime_type: Option(String),
+  )
+}
+
+/// Build an upload-only public-key certificate for `setWebhook`.
+pub fn webhook_certificate(
+  bytes: BitArray,
+  filename: String,
+  mime_type: Option(String),
+) -> WebhookCertificate {
+  WebhookCertificate(bytes:, filename:, mime_type:)
+}
+
+/// Register a webhook and upload a self-signed public-key certificate.
+///
+/// The URL and secret retain the same validated types as `set_webhook`; only
+/// the transport changes to `multipart/form-data` for the required upload.
+pub fn set_webhook_with_certificate(
+  api: Api,
+  url: HttpsUrl,
+  certificate: WebhookCertificate,
+  options: SetWebhookOptions,
+) -> Result(Bool, GlammyError) {
+  let option_parts =
+    []
+    |> opt_extra("ip_address", options.ip_address)
+    |> opt_int_extra("max_connections", options.max_connections)
+    |> opt_extra(
+      "allowed_updates",
+      option.map(options.allowed_updates, fn(updates) {
+        updates |> json.array(json.string) |> json.to_string
+      }),
+    )
+    |> opt_bool_extra("drop_pending_updates", options.drop_pending_updates)
+    |> opt_extra(
+      "secret_token",
+      option.map(options.secret_token, webhook_secret.to_string),
+    )
+  let parts = [
+    TextPart(name: "url", value: https_url.to_string(url)),
+    FilePart(
+      name: "certificate",
+      filename: certificate.filename,
+      content_type: certificate.mime_type,
+      body: certificate.bytes,
+    ),
+    ..list.map(option_parts, fn(part) { TextPart(name: part.0, value: part.1) })
+  ]
+  call_multipart(api, "setWebhook", parts, decode.bool)
+}
+
 /// Optional registration settings accepted by Telegram's `setWebhook` method.
 pub type SetWebhookOptions {
   SetWebhookOptions(
