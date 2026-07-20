@@ -2,17 +2,62 @@ name = "glammy"
 version = "0.1.0"
 description = "A Telegram Bot Framework for Gleam — a port of grammY (https://github.com/grammyjs/grammY)."
 licences = ["MIT"]
+gleam = ">= 1.16.0"
 target = "erlang"
+repository = { type = "github", user = "castletaste", repo = "glammy" }
+links = [
+  { title = "GitHub", href = "https://github.com/castletaste/glammy" },
+  { title = "grammY", href = "https://grammy.dev" },
+]
 
-# Dependencies are pinned and all from the official `gleam-lang` GitHub org on
-# hex.pm. Do not add any third-party deps without explicit vetting — bot tokens
-# are sensitive credentials.
+[erlang]
+# `multipart` and `webhook` call OTP's crypto module directly. Declaring the
+# application here makes it part of the generated `.app` dependency list for
+# downstream releases instead of relying on ambient startup order.
+extra_applications = ["crypto"]
+
+[[documentation.pages]]
+title = "Guide"
+path = "guide.html"
+source = "./docs/README.md"
+
+[[documentation.pages]]
+title = "Architecture"
+path = "architecture.html"
+source = "./docs/architecture.md"
+
+[[documentation.pages]]
+title = "Design decisions"
+path = "design-decisions.html"
+source = "./docs/design-decisions.md"
+
+[[documentation.pages]]
+title = "grammY mapping"
+path = "grammy-mapping.html"
+source = "./docs/grammy-parity.md"
+
+[[documentation.pages]]
+title = "Roadmap"
+path = "roadmap.html"
+source = "./docs/roadmap.md"
+
+[[documentation.pages]]
+title = "Releasing"
+path = "releasing.html"
+source = "./docs/releasing.md"
+
+# Runtime dependency ranges are bounded and packages come from the official
+# `gleam-lang` GitHub organisation. The dev-only `gleeunit` runner is maintained
+# at `lpil/gleeunit`. Do not add dependencies without explicit vetting — bot
+# tokens are sensitive credentials. Exact resolved versions live in
+# `manifest.toml`.
 [dependencies]
-gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_stdlib = ">= 1.0.3 and < 2.0.0"
 gleam_erlang = ">= 1.3.0 and < 2.0.0"
-gleam_json = ">= 3.0.0 and < 4.0.0"
-gleam_http = ">= 4.0.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_http = ">= 4.3.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
+gleam_otp = ">= 1.2.0 and < 2.0.0"
 
 [dev_dependencies]
-gleeunit = ">= 1.2.0 and < 2.0.0"
+gleeunit = ">= 1.11.0 and < 2.0.0"

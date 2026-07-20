@@ -114,3 +114,26 @@ pub fn text_part_has_correct_delimiters_test() {
   // The pattern: …name="field"\r\n\r\nVALUE\r\n--<boundary>--\r\n
   assert string.contains(body, "name=\"field\"\r\n\r\nVALUE\r\n")
 }
+
+pub fn disposition_parameters_cannot_inject_headers_test() {
+  let part =
+    multipart.FilePart(
+      name: "photo\\\r\nx-field: injected",
+      filename: "cat\\\"\r\nx-file: injected.png",
+      content_type: Some("image/png\r\nx-type: injected"),
+      body: <<"PNGDATA":utf8>>,
+    )
+  let encoded = multipart.encode([part])
+  let assert Ok(body) = bit_array.to_string(encoded.body)
+
+  assert !string.contains(body, "\r\nx-field: injected")
+  assert !string.contains(body, "\r\nx-file: injected")
+  assert !string.contains(body, "\r\nx-type: injected")
+  assert !string.contains(body, "\\")
+  assert string.contains(body, "name=\"photo%5C%0D%0Ax-field: injected\"")
+  assert string.contains(
+    body,
+    "filename=\"cat%5C%22%0D%0Ax-file: injected.png\"",
+  )
+  assert string.contains(body, "content-type: application/octet-stream")
+}

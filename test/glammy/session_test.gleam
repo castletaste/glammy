@@ -1,35 +1,33 @@
-//// Tests mirroring grammY's `test/convenience/session.test.ts`. Many
-//// grammY tests verify JS-mutation semantics (`ctx.session = null`
-//// triggers delete) and exception-based error paths; glammy's session
-//// is a pure-function model where the handler returns the new value
-//// (or the same value to write nothing observable). The behavioural
-//// invariants — read/write/persist across calls, key independence,
-//// custom storage backends — are all covered here.
+//// Session storage, atomicity, failure, and lifecycle tests.
 
-import glammy/api
 import glammy/composer
 import glammy/context
+import glammy/helpers.{
+  dummy_api, message_update as make_message, no_event, receive_event, receive_n,
+}
 import glammy/session
-import glammy/types.{type Update}
+import glammy/types
 import gleam/dict.{type Dict}
+import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/otp/system
+import gleam/string
 
-fn dummy_api() -> api.Api {
-  api.new("0:test")
+const timeout_protocol_ms = 75
+
+const stop_stress_count = 32
+
+fn memory_storage() -> session.Storage(value) {
+  let assert Ok(storage) = session.memory_storage()
+  storage
 }
 
-fn make_message(text: String, chat_id: Int) -> Update {
-  let body =
-    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":"
-    <> int.to_string(chat_id)
-    <> ",\"type\":\"private\"},\"date\":0,\"text\":\""
-    <> text
-    <> "\"}}"
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  u
+fn ignore_storage_error(_ctx, _error) -> Nil {
+  Nil
 }
 
 // =====================================================================
@@ -37,26 +35,320 @@ fn make_message(text: String, chat_id: Int) -> Update {
 // =====================================================================
 
 pub fn storage_round_trips_test() {
-  let storage = session.memory_storage()
+  let storage = memory_storage()
 
-  assert session.storage_get(storage, "k") == None
-
-  session.storage_set(storage, "k", 42)
-  assert session.storage_get(storage, "k") == Some(42)
-
-  session.storage_set(storage, "k", 100)
-  assert session.storage_get(storage, "k") == Some(100)
-
-  session.storage_delete(storage, "k")
-  assert session.storage_get(storage, "k") == None
+  assert session.storage_get(storage, "k") == Ok(None)
+  assert session.storage_set(storage, "k", 42) == Ok(Nil)
+  assert session.storage_get(storage, "k") == Ok(Some(42))
+  assert session.storage_set(storage, "k", 100) == Ok(Nil)
+  assert session.storage_get(storage, "k") == Ok(Some(100))
+  assert session.storage_delete(storage, "k") == Ok(Nil)
+  assert session.storage_get(storage, "k") == Ok(None)
+  assert session.storage_stop(storage) == Ok(Nil)
 }
 
 pub fn storage_keys_are_independent_test() {
-  let storage: session.Storage(String) = session.memory_storage()
-  session.storage_set(storage, "a", "alpha")
-  session.storage_set(storage, "b", "beta")
-  assert session.storage_get(storage, "a") == Some("alpha")
-  assert session.storage_get(storage, "b") == Some("beta")
+  let storage: session.Storage(String) = memory_storage()
+  assert session.storage_set(storage, "a", "alpha") == Ok(Nil)
+  assert session.storage_set(storage, "b", "beta") == Ok(Nil)
+  assert session.storage_get(storage, "a") == Ok(Some("alpha"))
+  assert session.storage_get(storage, "b") == Ok(Some("beta"))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn storage_calls_fail_after_stop_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_get(storage, "k") == Error(session.Stopped)
+}
+
+pub fn invalid_call_timeout_is_rejected_test() {
+  assert session.memory_storage_with_timeout(0)
+    == Error(session.InvalidCallTimeout(0))
+}
+
+pub fn process_timeout_boundary_is_validated_test() {
+  let maximum: Result(session.Storage(Int), session.StorageError) =
+    session.memory_storage_with_timeout(4_294_967_295)
+  let assert Ok(storage) = maximum
+  assert session.storage_stop(storage) == Ok(Nil)
+
+  let too_large: Result(session.Storage(Int), session.StorageError) =
+    session.memory_storage_with_timeout(4_294_967_296)
+  assert too_large == Error(session.InvalidCallTimeout(4_294_967_296))
+}
+
+pub fn bounded_storage_call_times_out_test() {
+  let backend_finished: process.Subject(Nil) = process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_with_timeout(
+      get: fn(_key) {
+        process.sleep(75)
+        process.send(backend_finished, Nil)
+        None
+      },
+      set: fn(_, _) { Nil },
+      delete: fn(_) { Nil },
+      call_timeout_ms: 10,
+    )
+
+  assert session.storage_get(storage, "slow") == Error(session.CallTimeout)
+  assert receive_event(backend_finished) == Ok(Nil)
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn queued_storage_set_expires_without_running_callback_test() {
+  let get_started: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let get_result: process.Subject(Result(Option(Int), session.StorageError)) =
+    process.new_subject()
+  let set_calls: process.Subject(Nil) = process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_with_timeout(
+      get: fn(_) {
+        let release: process.Subject(Nil) = process.new_subject()
+        process.send(get_started, release)
+        process.receive_forever(release)
+        None
+      },
+      set: fn(_, _) { process.send(set_calls, Nil) },
+      delete: fn(_) { Nil },
+      call_timeout_ms: timeout_protocol_ms,
+    )
+
+  let _ =
+    process.spawn_unlinked(fn() {
+      process.send(get_result, session.storage_get(storage, "blocker"))
+    })
+  let assert Ok(release_get) = receive_event(get_started)
+
+  // `Set` is queued behind the blocked `Get`, so its deadline elapses before
+  // the actor can emit `began`. It is therefore safe to retry and must not run
+  // the backend callback later when the actor drains its mailbox.
+  assert session.storage_set(storage, "k", 42) == Error(session.CallTimeout)
+  assert receive_event(get_result) == Ok(Error(session.CallTimeout))
+  process.send(release_get, Nil)
+
+  // Stop is queued after Set. Its DOWN acknowledgement is also our barrier
+  // proving the actor inspected and rejected the expired Set.
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert no_event(set_calls)
+}
+
+pub fn started_storage_set_reports_unknown_then_completes_test() {
+  let set_started: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let set_completed: process.Subject(Nil) = process.new_subject()
+  let result: process.Subject(Result(Nil, session.StorageError)) =
+    process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_with_timeout(
+      get: fn(_) { None },
+      set: fn(_, _) {
+        let release: process.Subject(Nil) = process.new_subject()
+        process.send(set_started, release)
+        process.receive_forever(release)
+        process.send(set_completed, Nil)
+      },
+      delete: fn(_) { Nil },
+      call_timeout_ms: timeout_protocol_ms,
+    )
+
+  let _ =
+    process.spawn_unlinked(fn() {
+      process.send(result, session.storage_set(storage, "k", 42))
+    })
+  let assert Ok(release_set) = receive_event(set_started)
+
+  assert receive_event(result)
+    == Ok(Error(session.MutationOutcomeUnknown(session.SetMutation)))
+  process.send(release_set, Nil)
+  assert receive_event(set_completed) == Ok(Nil)
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn concurrent_storage_stop_is_idempotent_and_waits_for_down_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let ready: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let outcomes: process.Subject(Result(Nil, session.StorageError)) =
+    process.new_subject()
+
+  list_each_int(stop_stress_count, fn(_) {
+    let _ =
+      process.spawn_unlinked(fn() {
+        let release: process.Subject(Nil) = process.new_subject()
+        process.send(ready, release)
+        process.receive_forever(release)
+        process.send(outcomes, session.storage_stop(storage))
+      })
+    Nil
+  })
+  collect_release_subjects(ready, stop_stress_count)
+  |> list.each(fn(release) { process.send(release, Nil) })
+
+  assert receive_ok_nil_results(outcomes, stop_stress_count)
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_get(storage, "k") == Error(session.Stopped)
+}
+
+pub fn backend_panics_are_typed_errors_test() {
+  let assert Ok(storage) =
+    session.custom_storage(
+      get: fn(_) { panic as "backend exploded" },
+      set: fn(_, _) { Nil },
+      delete: fn(_) { Nil },
+    )
+
+  case session.storage_get(storage, "k") {
+    Error(error) -> {
+      let description = string.inspect(error)
+      assert string.contains(description, "BackendFailed")
+      assert string.contains(description, "backend exploded")
+    }
+    _ -> panic as "expected BackendFailed"
+  }
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn storage_set_lost_ack_is_unknown_and_retires_storage_test() {
+  let committed: process.Subject(Nil) = process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_result(
+      get: fn(_) { Ok(None) },
+      set: fn(_, _) {
+        process.send(committed, Nil)
+        Error("lost acknowledgement")
+      },
+      delete: fn(_) { Ok(Nil) },
+    )
+
+  let outcome = session.storage_set(storage, "k", 1)
+  assert receive_event(committed) == Ok(Nil)
+  assert outcome == Error(session.MutationOutcomeUnknown(session.SetMutation))
+
+  // The adapter cannot reuse its now-stale local revision after an external
+  // commit whose acknowledgement was lost.
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_get(storage, "k") == Error(session.Stopped)
+}
+
+pub fn session_backend_panic_after_commit_is_unknown_and_skips_effect_test() {
+  let committed: process.Subject(Nil) = process.new_subject()
+  let effects: process.Subject(Nil) = process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_result(
+      get: fn(_) { Ok(Some(0)) },
+      set: fn(_, _) {
+        process.send(committed, Nil)
+        panic as "backend panicked after commit"
+      },
+      delete: fn(_) { Ok(Nil) },
+    )
+
+  let outcome =
+    session.run(
+      storage,
+      context.new(make_message("hi", 1), dummy_api()),
+      session.by_chat_id,
+      0,
+      fn(_, count) {
+        session.update_then(count + 1, fn() { process.send(effects, Nil) })
+      },
+    )
+
+  assert receive_event(committed) == Ok(Nil)
+  assert outcome
+    == Error(session.MutationOutcomeUnknown(session.CompareSetMutation))
+  assert no_event(effects)
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert session.storage_get(storage, "1") == Error(session.Stopped)
+  assert no_event(effects)
+}
+
+pub fn update_handler_panics_are_typed_errors_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let result =
+    session.storage_update(storage, "k", 0, fn(_) {
+      panic as "handler exploded"
+    })
+  case result {
+    Error(error) -> {
+      let description = string.inspect(error)
+      assert string.contains(description, "HandlerFailed")
+      assert string.contains(description, "handler exploded")
+    }
+    _ -> panic as "expected HandlerFailed"
+  }
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn after_commit_failure_preserves_committed_state_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let result =
+    session.run(
+      storage,
+      context.new(make_message("hi", 1), dummy_api()),
+      session.by_chat_id,
+      0,
+      fn(_, count) {
+        session.update_then(count + 1, fn() { panic as "effect exploded" })
+      },
+    )
+  case result {
+    Error(error) -> {
+      let description = string.inspect(error)
+      assert string.contains(description, "AfterCommitFailed")
+      assert string.contains(description, "effect exploded")
+    }
+    _ -> panic as "expected AfterCommitFailed"
+  }
+  assert session.storage_get(storage, "1") == Ok(Some(1))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn session_run_started_cas_timeout_skips_after_commit_test() {
+  let cas_started: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let cas_completed: process.Subject(Nil) = process.new_subject()
+  let effects: process.Subject(Nil) = process.new_subject()
+  let outcome: process.Subject(Result(Nil, session.StorageError)) =
+    process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage_with_timeout(
+      get: fn(_) { Some(0) },
+      set: fn(_, _) {
+        let release: process.Subject(Nil) = process.new_subject()
+        process.send(cas_started, release)
+        process.receive_forever(release)
+        process.send(cas_completed, Nil)
+      },
+      delete: fn(_) { Nil },
+      call_timeout_ms: timeout_protocol_ms,
+    )
+
+  let _ =
+    process.spawn_unlinked(fn() {
+      process.send(
+        outcome,
+        session.run(
+          storage,
+          context.new(make_message("hi", 1), dummy_api()),
+          session.by_chat_id,
+          0,
+          fn(_, count) {
+            session.update_then(count + 1, fn() { process.send(effects, Nil) })
+          },
+        ),
+      )
+    })
+  let assert Ok(release_cas) = receive_event(cas_started)
+
+  assert receive_event(outcome)
+    == Ok(Error(session.MutationOutcomeUnknown(session.CompareSetMutation)))
+  assert no_event(effects)
+  process.send(release_cas, Nil)
+  assert receive_event(cas_completed) == Ok(Nil)
+  assert session.storage_stop(storage) == Ok(Nil)
+  assert no_event(effects)
 }
 
 // =====================================================================
@@ -65,133 +357,281 @@ pub fn storage_keys_are_independent_test() {
 
 pub fn with_session_loads_and_persists_test() {
   let recorder: process.Subject(Int) = process.new_subject()
-  let storage: session.Storage(Int) = session.memory_storage()
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(_ctx, n) {
-      let next = n + 1
-      process.send(recorder, next)
-      next
-    })
-
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-
-  assert process.receive(recorder, 50) == Ok(1)
-  assert process.receive(recorder, 50) == Ok(2)
-  assert process.receive(recorder, 50) == Ok(3)
-}
-
-pub fn different_chats_have_independent_sessions_test() {
-  let recorder: process.Subject(#(Int, Int)) = process.new_subject()
-  let storage: session.Storage(Int) = session.memory_storage()
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(ctx, n) {
-      let assert Some(c) = context.chat(ctx)
-      let next = n + 1
-      process.send(recorder, #(c.id, next))
-      next
-    })
-
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 2), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 2), dummy_api()))
-
-  assert process.receive(recorder, 50) == Ok(#(1, 1))
-  assert process.receive(recorder, 50) == Ok(#(2, 1))
-  assert process.receive(recorder, 50) == Ok(#(1, 2))
-  assert process.receive(recorder, 50) == Ok(#(2, 2))
-}
-
-pub fn session_chain_continues_after_handler_test() {
-  let recorder: process.Subject(String) = process.new_subject()
-  let storage: session.Storage(Int) = session.memory_storage()
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(_ctx, n) {
-      process.send(recorder, "session")
-      n
-    })
-    |> composer.handle(fn(_ctx) {
-      process.send(recorder, "after")
-      Nil
-    })
-
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  assert process.receive(recorder, 50) == Ok("session")
-  assert process.receive(recorder, 50) == Ok("after")
-}
-
-pub fn skips_when_key_fn_returns_none_test() {
-  let recorder: process.Subject(String) = process.new_subject()
-  let storage: session.Storage(Int) = session.memory_storage()
-  let comp =
-    composer.new()
-    |> session.with_session(storage, fn(_ctx) { None }, 0, fn(_ctx, n) {
-      process.send(recorder, "ran")
-      n
-    })
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  assert process.receive(recorder, 50) == Error(Nil)
-}
-
-// =====================================================================
-//             IO with primitives / objects (grammY parity)
-// =====================================================================
-
-pub fn does_io_with_primitives_test() {
-  let storage: session.Storage(Int) = session.memory_storage()
-  let recorder: process.Subject(Int) = process.new_subject()
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(_ctx, n) {
-      process.send(recorder, n)
-      n + 1
-    })
-
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-
-  assert process.receive(recorder, 50) == Ok(0)
-  assert process.receive(recorder, 50) == Ok(1)
-  assert session.storage_get(storage, "1") == Some(2)
-}
-
-pub fn does_io_with_objects_test() {
-  let storage: session.Storage(Dict(String, Int)) = session.memory_storage()
-  let recorder: process.Subject(Int) = process.new_subject()
+  let storage: session.Storage(Int) = memory_storage()
 
   let comp =
     composer.new()
     |> session.with_session(
       storage,
       session.by_chat_id,
-      dict.new(),
-      fn(_ctx, d) {
-        let size = dict.size(d)
-        process.send(recorder, size)
-        case size {
-          0 -> dict.insert(d, "foo", 0)
-          1 -> dict.insert(d, "bar", 0)
-          _ -> dict.insert(d, "baz", 0)
-        }
+      0,
+      fn(_ctx, count) {
+        let next = count + 1
+        session.update_then(next, fn() { process.send(recorder, next) })
       },
+      on_error: ignore_storage_error,
     )
 
   composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
   composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
   composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
 
-  assert process.receive(recorder, 50) == Ok(0)
-  assert process.receive(recorder, 50) == Ok(1)
-  assert process.receive(recorder, 50) == Ok(2)
+  assert receive_event(recorder) == Ok(1)
+  assert receive_event(recorder) == Ok(2)
+  assert receive_event(recorder) == Ok(3)
+  assert session.storage_get(storage, "1") == Ok(Some(3))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn concurrent_session_updates_are_atomic_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let ready: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let completed: process.Subject(Nil) = process.new_subject()
+  let effects: process.Subject(Nil) = process.new_subject()
+  let failures: process.Subject(session.StorageError) = process.new_subject()
+
+  list_each_int(20, fn(_) {
+    let _ =
+      process.spawn(fn() {
+        // Every worker reaches its first transition after reading version 0,
+        // then waits on its own gate. Retries skip the barrier.
+        let first_attempt: process.Subject(Bool) = process.new_subject()
+        process.send(first_attempt, True)
+        let comp =
+          composer.new()
+          |> session.with_session(
+            storage,
+            session.by_chat_id,
+            0,
+            fn(_, count) {
+              let assert Ok(is_first) = process.receive(first_attempt, 0)
+              process.send(first_attempt, False)
+              case is_first {
+                True -> {
+                  let release: process.Subject(Nil) = process.new_subject()
+                  process.send(ready, release)
+                  process.receive_forever(release)
+                }
+                False -> Nil
+              }
+              session.update_then(count + 1, fn() { process.send(effects, Nil) })
+            },
+            on_error: fn(_, error) { process.send(failures, error) },
+          )
+        composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+        process.send(completed, Nil)
+      })
+    Nil
+  })
+
+  collect_release_subjects(ready, 20)
+  |> list.each(fn(release) { process.send(release, Nil) })
+  assert receive_n(completed, 20)
+  assert receive_n(effects, 20)
+  assert no_event(effects)
+  assert no_event(failures)
+  assert session.storage_get(storage, "1") == Ok(Some(20))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn missing_revision_rejects_set_delete_recreate_aba_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let ready: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let completed: process.Subject(Result(Int, session.StorageError)) =
+    process.new_subject()
+  let _ =
+    process.spawn_unlinked(fn() {
+      let first_attempt: process.Subject(Bool) = process.new_subject()
+      process.send(first_attempt, True)
+      let result =
+        session.storage_update(storage, "k", 0, fn(value) {
+          let assert Ok(is_first) = process.receive(first_attempt, 0)
+          process.send(first_attempt, False)
+          case is_first {
+            True -> {
+              let release: process.Subject(Nil) = process.new_subject()
+              process.send(ready, release)
+              process.receive_forever(release)
+            }
+            False -> Nil
+          }
+          value + 1
+        })
+      process.send(completed, result)
+    })
+
+  let assert Ok(release) = receive_event(ready)
+  assert session.storage_set(storage, "k", 1) == Ok(Nil)
+  assert session.storage_delete(storage, "k") == Ok(Nil)
+  assert session.storage_set(storage, "k", 5) == Ok(Nil)
+  process.send(release, Nil)
+
+  assert receive_event(completed) == Ok(Ok(6))
+  assert session.storage_get(storage, "k") == Ok(Some(6))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn present_revision_rejects_set_delete_recreate_aba_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  assert session.storage_set(storage, "k", 0) == Ok(Nil)
+  let ready: process.Subject(process.Subject(Nil)) = process.new_subject()
+  let completed: process.Subject(Result(Int, session.StorageError)) =
+    process.new_subject()
+  let _ =
+    process.spawn_unlinked(fn() {
+      let first_attempt: process.Subject(Bool) = process.new_subject()
+      process.send(first_attempt, True)
+      let result =
+        session.storage_update(storage, "k", 0, fn(value) {
+          let assert Ok(is_first) = process.receive(first_attempt, 0)
+          process.send(first_attempt, False)
+          case is_first {
+            True -> {
+              let release: process.Subject(Nil) = process.new_subject()
+              process.send(ready, release)
+              process.receive_forever(release)
+            }
+            False -> Nil
+          }
+          value + 1
+        })
+      process.send(completed, result)
+    })
+
+  let assert Ok(release) = receive_event(ready)
+  assert session.storage_set(storage, "k", 1) == Ok(Nil)
+  assert session.storage_delete(storage, "k") == Ok(Nil)
+  assert session.storage_set(storage, "k", 5) == Ok(Nil)
+  process.send(release, Nil)
+
+  assert receive_event(completed) == Ok(Ok(6))
+  assert session.storage_get(storage, "k") == Ok(Some(6))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn deleted_key_revision_metadata_is_compacted_under_churn_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  list_each_int(500, fn(index) {
+    let key = "gone-" <> int.to_string(index)
+    assert session.storage_set(storage, key, index) == Ok(Nil)
+    assert session.storage_delete(storage, key) == Ok(Nil)
+  })
+
+  let state = system.get_state(from: storage_pid(3, storage))
+  let versions = storage_present_versions(3, state)
+  assert dict.size(versions) == 0
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn different_chats_have_independent_sessions_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let comp =
+    composer.new()
+    |> session.with_session(
+      storage,
+      session.by_chat_id,
+      0,
+      fn(_, count) { session.update(count + 1) },
+      on_error: ignore_storage_error,
+    )
+
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  composer.run(comp, context.new(make_message("hi", 2), dummy_api()))
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  assert session.storage_get(storage, "1") == Ok(Some(2))
+  assert session.storage_get(storage, "2") == Ok(Some(1))
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn session_chain_continues_after_success_test() {
+  let recorder: process.Subject(String) = process.new_subject()
+  let storage: session.Storage(Int) = memory_storage()
+  let comp =
+    composer.new()
+    |> session.with_session(
+      storage,
+      session.by_chat_id,
+      0,
+      fn(_, count) {
+        session.update_then(count, fn() { process.send(recorder, "session") })
+      },
+      on_error: ignore_storage_error,
+    )
+    |> composer.handle(fn(_) { process.send(recorder, "after") })
+
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  assert receive_event(recorder) == Ok("session")
+  assert receive_event(recorder) == Ok("after")
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn storage_failure_calls_handler_and_stops_chain_test() {
+  let recorder: process.Subject(String) = process.new_subject()
+  let storage: session.Storage(Int) = memory_storage()
+  assert session.storage_stop(storage) == Ok(Nil)
+  let comp =
+    composer.new()
+    |> session.with_session(
+      storage,
+      session.by_chat_id,
+      0,
+      fn(_, count) { session.update(count + 1) },
+      on_error: fn(_, error) {
+        case error {
+          session.Stopped -> process.send(recorder, "stopped")
+          _ -> process.send(recorder, "other")
+        }
+      },
+    )
+    |> composer.handle(fn(_) { process.send(recorder, "downstream") })
+
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  assert receive_event(recorder) == Ok("stopped")
+  assert no_event(recorder)
+}
+
+pub fn skips_when_key_fn_returns_none_test() {
+  let recorder: process.Subject(String) = process.new_subject()
+  let storage: session.Storage(Int) = memory_storage()
+  let comp =
+    composer.new()
+    |> session.with_session(
+      storage,
+      fn(_) { None },
+      0,
+      fn(_, count) {
+        session.update_then(count, fn() { process.send(recorder, "ran") })
+      },
+      on_error: ignore_storage_error,
+    )
+    |> composer.handle(fn(_) { process.send(recorder, "next") })
+
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  assert receive_event(recorder) == Ok("next")
+  assert no_event(recorder)
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn does_io_with_objects_test() {
+  let storage: session.Storage(Dict(String, Int)) = memory_storage()
+  let comp =
+    composer.new()
+    |> session.with_session(
+      storage,
+      session.by_chat_id,
+      dict.new(),
+      fn(_, values) {
+        session.update(dict.insert(values, int.to_string(dict.size(values)), 0))
+      },
+      on_error: ignore_storage_error,
+    )
+
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
+  let assert Ok(Some(values)) = session.storage_get(storage, "1")
+  assert dict.size(values) == 3
+  assert session.storage_stop(storage) == Ok(Nil)
 }
 
 // =====================================================================
@@ -199,117 +639,139 @@ pub fn does_io_with_objects_test() {
 // =====================================================================
 
 pub fn works_with_custom_storage_test() {
-  // Spy storage that records all calls into a Subject.
   let calls: process.Subject(String) = process.new_subject()
-  let backing: process.Subject(Dict(String, Int)) = process.new_subject()
-  process.send(backing, dict.new())
 
   let read = fn(key: String) -> Option(Int) {
     process.send(calls, "read:" <> key)
-    let assert Ok(d) = process.receive(backing, 50)
-    process.send(backing, d)
-    case dict.get(d, key) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    }
+    None
   }
   let write = fn(key: String, value: Int) -> Nil {
     process.send(calls, "write:" <> key <> "=" <> int.to_string(value))
-    let assert Ok(d) = process.receive(backing, 50)
-    process.send(backing, dict.insert(d, key, value))
   }
-  let delete = fn(key: String) -> Nil {
-    process.send(calls, "delete:" <> key)
-    let assert Ok(d) = process.receive(backing, 50)
-    process.send(backing, dict.delete(d, key))
-  }
-  let storage = session.custom_storage(get: read, set: write, delete: delete)
+  let delete = fn(_key: String) -> Nil { Nil }
+  let assert Ok(storage) =
+    session.custom_storage(get: read, set: write, delete: delete)
 
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(_, n) { n + 1 })
+  assert session.storage_update(storage, "42", 0, fn(count) { count + 1 })
+    == Ok(1)
+  assert receive_event(calls) == Ok("read:42")
+  assert receive_event(calls) == Ok("write:42=1")
+  assert session.storage_stop(storage) == Ok(Nil)
+}
 
-  composer.run(comp, context.new(make_message("hi", 42), dummy_api()))
-  // Should call read once with "42", then write once with "42=1".
-  assert process.receive(calls, 50) == Ok("read:42")
-  assert process.receive(calls, 50) == Ok("write:42=1")
+pub fn custom_storage_delete_callback_runs_exactly_once_test() {
+  let calls: process.Subject(String) = process.new_subject()
+  let assert Ok(storage) =
+    session.custom_storage(
+      get: fn(_) { None },
+      set: fn(_, _) { Nil },
+      delete: fn(key) { process.send(calls, "delete:" <> key) },
+    )
+
+  assert session.storage_delete(storage, "42") == Ok(Nil)
+  assert receive_event(calls) == Ok("delete:42")
+  assert no_event(calls)
+  assert session.storage_stop(storage) == Ok(Nil)
+}
+
+pub fn typed_custom_storage_preserves_backend_error_test() {
+  let assert Ok(storage) =
+    session.custom_storage_result(
+      get: fn(_) { Error("redis unavailable") },
+      set: fn(_, _) { Ok(Nil) },
+      delete: fn(_) { Ok(Nil) },
+    )
+  assert session.storage_get(storage, "k")
+    == Error(session.BackendError("redis unavailable"))
+  assert session.storage_stop(storage) == Ok(Nil)
 }
 
 // =====================================================================
-//                          Custom key prefixing
-// =====================================================================
-
-pub fn works_with_custom_session_keys_test() {
-  let storage: session.Storage(Int) = session.memory_storage()
-  let prefixed_by_square = fn(ctx) {
-    case context.chat(ctx) {
-      Some(c) -> Some("xyz-" <> int.to_string(c.id * c.id))
-      None -> None
-    }
-  }
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, prefixed_by_square, 0, fn(_, n) { n + 1 })
-
-  composer.run(comp, context.new(make_message("hi", 42), dummy_api()))
-  composer.run(comp, context.new(make_message("hi", 42), dummy_api()))
-  // chat 42 → key "xyz-1764", value 2 after two calls
-  assert session.storage_get(storage, "xyz-1764") == Some(2)
-}
-
-// =====================================================================
-//                       by_user_id / by_chat_and_user
+//                            Key functions
 // =====================================================================
 
 const message_with_user = "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":7,\"type\":\"private\"},\"date\":0,\"text\":\"hi\",\"from\":{\"id\":99,\"is_bot\":false,\"first_name\":\"U\"}}}"
 
-pub fn by_user_id_keys_test() {
-  let storage: session.Storage(Int) = session.memory_storage()
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_user_id, 0, fn(_, n) { n + 1 })
+const business_connection_with_user = "{\"update_id\":2,\"business_connection\":{\"id\":\"conn\",\"user\":{\"id\":99,\"is_bot\":false,\"first_name\":\"U\"},\"user_chat_id\":700,\"date\":1,\"is_enabled\":true}}"
 
-  let assert Ok(u) = json.parse(message_with_user, types.update_decoder())
-  composer.run(comp, context.new(u, dummy_api()))
-  composer.run(comp, context.new(u, dummy_api()))
-  assert session.storage_get(storage, "99") == Some(2)
+pub fn built_in_key_functions_test() {
+  let assert Ok(update) = json.parse(message_with_user, types.update_decoder())
+  let ctx = context.new(update, dummy_api())
+  assert session.by_chat_id(ctx) == Some("7")
+  assert session.by_user_id(ctx) == Some("99")
+  assert session.by_chat_and_user(ctx) == Some("7:99")
+
+  let assert Ok(business_update) =
+    json.parse(business_connection_with_user, types.update_decoder())
+  let business_ctx = context.new(business_update, dummy_api())
+  assert session.by_chat_id(business_ctx) == Some("700")
+  assert session.by_user_id(business_ctx) == Some("99")
+  assert session.by_chat_and_user(business_ctx) == Some("700:99")
 }
 
-pub fn by_chat_and_user_keys_test() {
-  let storage: session.Storage(Int) = session.memory_storage()
+pub fn works_with_custom_session_keys_test() {
+  let storage: session.Storage(Int) = memory_storage()
+  let key_by_square = fn(ctx) {
+    case context.chat(ctx) {
+      Some(chat) -> Some("xyz-" <> int.to_string(chat.id * chat.id))
+      None -> None
+    }
+  }
   let comp =
     composer.new()
-    |> session.with_session(storage, session.by_chat_and_user, 0, fn(_, n) {
-      n + 1
-    })
+    |> session.with_session(
+      storage,
+      key_by_square,
+      0,
+      fn(_, count) { session.update(count + 1) },
+      on_error: ignore_storage_error,
+    )
 
-  let assert Ok(u) = json.parse(message_with_user, types.update_decoder())
-  composer.run(comp, context.new(u, dummy_api()))
-  // chat=7, user=99 → key "7:99"
-  assert session.storage_get(storage, "7:99") == Some(1)
+  composer.run(comp, context.new(make_message("hi", 42), dummy_api()))
+  composer.run(comp, context.new(make_message("hi", 42), dummy_api()))
+  assert session.storage_get(storage, "xyz-1764") == Ok(Some(2))
+  assert session.storage_stop(storage) == Ok(Nil)
 }
 
-// =====================================================================
-//                       Pass-through (handler doesn't change)
-// =====================================================================
-
-pub fn passes_through_updates_test() {
-  let storage: session.Storage(Int) = session.memory_storage()
-  let recorder: process.Subject(String) = process.new_subject()
-
-  let comp =
-    composer.new()
-    |> session.with_session(storage, session.by_chat_id, 0, fn(_ctx, n) {
-      process.send(recorder, "session-ran")
-      n
-    })
-    |> composer.handle(fn(_ctx) {
-      process.send(recorder, "downstream-ran")
-      Nil
-    })
-
-  composer.run(comp, context.new(make_message("hi", 1), dummy_api()))
-  assert process.receive(recorder, 50) == Ok("session-ran")
-  assert process.receive(recorder, 50) == Ok("downstream-ran")
+fn collect_release_subjects(
+  ready: process.Subject(process.Subject(Nil)),
+  remaining: Int,
+) -> List(process.Subject(Nil)) {
+  case remaining <= 0 {
+    True -> []
+    False -> {
+      let assert Ok(release) = receive_event(ready)
+      [release, ..collect_release_subjects(ready, remaining - 1)]
+    }
+  }
 }
+
+fn list_each_int(count: Int, operation: fn(Int) -> Nil) -> Nil {
+  case count {
+    0 -> Nil
+    _ -> {
+      operation(count)
+      list_each_int(count - 1, operation)
+    }
+  }
+}
+
+fn receive_ok_nil_results(
+  outcomes: process.Subject(Result(Nil, error)),
+  remaining: Int,
+) -> Bool {
+  case remaining <= 0 {
+    True -> True
+    False ->
+      case receive_event(outcomes) {
+        Ok(Ok(Nil)) -> receive_ok_nil_results(outcomes, remaining - 1)
+        _ -> False
+      }
+  }
+}
+
+@external(erlang, "erlang", "element")
+fn storage_pid(index: Int, storage: session.Storage(value)) -> process.Pid
+
+@external(erlang, "erlang", "element")
+fn storage_present_versions(index: Int, state: Dynamic) -> Dict(String, Int)

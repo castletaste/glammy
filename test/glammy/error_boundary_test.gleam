@@ -2,21 +2,17 @@
 //// Erlang errors/exits/throws raised by middleware so the bot's poll
 //// loop survives panicking handlers.
 
-import glammy/api
 import glammy/composer
 import glammy/context
 import glammy/error_boundary
+import glammy/helpers.{dummy_api, no_event, receive_event}
 import glammy/types.{type Update}
 import gleam/erlang/process
-import gleam/json
 
 fn make_update() -> Update {
-  let assert Ok(u) =
-    json.parse(
-      "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}",
-      types.update_decoder(),
-    )
-  u
+  helpers.update_from(
+    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}",
+  )
 }
 
 fn run_with(boundary: composer.Middleware, post: fn(context.Context) -> Nil) {
@@ -24,7 +20,7 @@ fn run_with(boundary: composer.Middleware, post: fn(context.Context) -> Nil) {
     composer.new()
     |> composer.use_middleware(boundary)
     |> composer.handle(post)
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
+  composer.run(comp, context.new(make_update(), dummy_api()))
 }
 
 pub fn boundary_catches_panic_test() {
@@ -40,8 +36,8 @@ pub fn boundary_catches_panic_test() {
     })
   run_with(mw, fn(_) { process.send(post, "post") })
 
-  assert process.receive(caught, 50) == Ok("caught")
-  assert process.receive(post, 50) == Ok("post")
+  assert receive_event(caught) == Ok("caught")
+  assert receive_event(post) == Ok("post")
 }
 
 pub fn boundary_lets_normal_returns_through_test() {
@@ -59,8 +55,8 @@ pub fn boundary_lets_normal_returns_through_test() {
     })
   run_with(mw, fn(_) { process.send(recorder, "post") })
 
-  assert process.receive(recorder, 50) == Ok("ran")
-  assert process.receive(recorder, 50) == Ok("post")
+  assert receive_event(recorder) == Ok("ran")
+  assert receive_event(recorder) == Ok("post")
 }
 
 pub fn boundary_catches_let_assert_failure_test() {
@@ -82,8 +78,8 @@ pub fn boundary_catches_let_assert_failure_test() {
     })
   run_with(mw, fn(_) { process.send(post, "post") })
 
-  assert process.receive(caught, 50) == Ok("caught-let-assert")
-  assert process.receive(post, 50) == Ok("post")
+  assert receive_event(caught) == Ok("caught-let-assert")
+  assert receive_event(post) == Ok("post")
 }
 
 pub fn boundary_catches_division_by_zero_test() {
@@ -105,8 +101,8 @@ pub fn boundary_catches_division_by_zero_test() {
     })
   run_with(mw, fn(_) { process.send(post, "post") })
 
-  assert process.receive(caught, 50) == Ok("caught-badarith")
-  assert process.receive(post, 50) == Ok("post")
+  assert receive_event(caught) == Ok("caught-badarith")
+  assert receive_event(post) == Ok("post")
 }
 
 pub fn boundary_passes_caught_error_to_handler_test() {
@@ -119,15 +115,38 @@ pub fn boundary_passes_caught_error_to_handler_test() {
   let mw =
     error_boundary.boundary(inner, fn(_ctx, err) {
       case err {
-        error_boundary.Caught(_class, _value, _stack) ->
-          process.send(inspected, "ok-shape")
+        error_boundary.Caught(error_boundary.ErrorClass, value, stack)
+          if value != "" && stack != ""
+        -> process.send(inspected, "ok-shape")
+        _ -> process.send(inspected, "bad-shape")
       }
     })
   let comp =
     composer.new()
     |> composer.use_middleware(mw)
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
-  assert process.receive(inspected, 50) == Ok("ok-shape")
+  composer.run(comp, context.new(make_update(), dummy_api()))
+  assert receive_event(inspected) == Ok("ok-shape")
+}
+
+pub fn boundary_maps_exit_and_throw_classes_test() {
+  assert caught_class(fn() { erlang_exit("intentional exit") })
+    == error_boundary.ExitClass
+  assert caught_class(fn() { erlang_throw("intentional throw") })
+    == error_boundary.ThrowClass
+}
+
+fn caught_class(raise: fn() -> Nil) -> error_boundary.BoundaryClass {
+  let caught: process.Subject(error_boundary.BoundaryClass) =
+    process.new_subject()
+  let inner = composer.new() |> composer.handle(fn(_) { raise() })
+  let middleware =
+    error_boundary.boundary(inner, fn(_ctx, error) {
+      let error_boundary.Caught(class, _, _) = error
+      process.send(caught, class)
+    })
+  run_with(middleware, fn(_) { Nil })
+  let assert Ok(class) = receive_event(caught)
+  class
 }
 
 pub fn nested_boundary_only_catches_inner_failure_test() {
@@ -156,11 +175,11 @@ pub fn nested_boundary_only_catches_inner_failure_test() {
     composer.new()
     |> composer.use_middleware(outer_mw)
     |> composer.handle(fn(_) { process.send(post, "post") })
-  composer.run(comp, context.new(make_update(), api.new("0:test")))
+  composer.run(comp, context.new(make_update(), dummy_api()))
 
-  assert process.receive(inner_caught, 50) == Ok("inner")
-  assert process.receive(outer_caught, 50) == Error(Nil)
-  assert process.receive(post, 50) == Ok("post")
+  assert receive_event(inner_caught) == Ok("inner")
+  assert no_event(outer_caught)
+  assert receive_event(post) == Ok("post")
 }
 
 // =====================================================================
@@ -169,6 +188,12 @@ pub fn nested_boundary_only_catches_inner_failure_test() {
 
 @external(erlang, "erlang", "div")
 fn unsafe_div(a: Int, b: Int) -> Int
+
+@external(erlang, "erlang", "exit")
+fn erlang_exit(reason: String) -> Nil
+
+@external(erlang, "erlang", "throw")
+fn erlang_throw(reason: String) -> Nil
 
 fn always_err() -> Result(Nil, Nil) {
   Error(Nil)

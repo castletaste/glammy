@@ -2,8 +2,10 @@
 //// `convenience/keyboard.ts`. Two flavours are exposed:
 ////
 //// - `InlineKeyboard` — attached to a message, with callback / URL /
-////   web-app / login / switch-inline / game / pay buttons. Renders into
-////   Telegram's `InlineKeyboardMarkup` JSON.
+////   web-app / login / switch-inline buttons. Renders into Telegram's
+////   `InlineKeyboardMarkup` JSON.
+//// - `GameInlineKeyboard` / `InvoiceInlineKeyboard` — endpoint-specific
+////   wrappers that keep the required game / pay button first in the first row.
 //// - `ReplyKeyboard` — the custom keyboard that replaces the user's
 ////   normal one. Supports text / contact / location / poll / web-app /
 ////   request_users / request_chat buttons. Renders into
@@ -12,36 +14,80 @@
 //// Both are built up row-by-row using a pipe-friendly builder pattern,
 //// and both support `transpose`, `flow`, and `append` post-processors.
 
+import glammy/https_url.{type HttpsUrl}
+import glammy/internal/json_utils
+import glammy/types.{type InputPollKind}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 
 // =====================================================================
 //                           InlineKeyboard
 // =====================================================================
 
+/// One action button in an inline keyboard row.
 pub type InlineKeyboardButton {
   InlineUrl(text: String, url: String)
   InlineCallback(text: String, callback_data: String)
-  InlineWebApp(text: String, url: String)
+  InlineCopy(text: String, copy_text: CopyText)
+  InlineWebApp(text: String, url: HttpsUrl)
   InlineLoginUrl(text: String, login_url: LoginUrl)
   InlineSwitchInline(text: String, query: String)
   InlineSwitchInlineCurrent(text: String, query: String)
   InlineSwitchInlineChosen(text: String, options: SwitchInlineChosenChat)
-  InlineGame(text: String)
-  InlinePay(text: String)
+  InlineDecorated(
+    button: InlineKeyboardButton,
+    style: Option(ButtonStyle),
+    icon_custom_emoji_id: Option(String),
+  )
 }
 
+/// A finite Telegram button style.
+pub type ButtonStyle {
+  Danger
+  Success
+  Primary
+}
+
+/// Validated text copied by an inline keyboard button.
+pub opaque type CopyText {
+  CopyText(value: String)
+}
+
+/// Why text cannot be used by a `CopyTextButton`.
+pub type CopyTextError {
+  EmptyCopyText
+  CopyTextTooLong(length: Int)
+}
+
+/// Validate text for Telegram's `CopyTextButton` (1-256 characters).
+pub fn copy_text(value: String) -> Result(CopyText, CopyTextError) {
+  let length = value |> string.to_utf_codepoints |> list.length
+  case length {
+    0 -> Error(EmptyCopyText)
+    length if length > 256 -> Error(CopyTextTooLong(length))
+    _ -> Ok(CopyText(value:))
+  }
+}
+
+/// Return the validated clipboard text.
+pub fn copy_text_value(value: CopyText) -> String {
+  value.value
+}
+
+/// Authentication options attached to an inline login button.
 pub type LoginUrl {
   LoginUrl(
-    url: String,
+    url: HttpsUrl,
     forward_text: Option(String),
     bot_username: Option(String),
     request_write_access: Option(Bool),
   )
 }
 
-pub fn login_url(url: String) -> LoginUrl {
+/// Create `LoginUrl` options with a validated HTTPS target.
+pub fn login_url(url: HttpsUrl) -> LoginUrl {
   LoginUrl(
     url:,
     forward_text: None,
@@ -50,6 +96,7 @@ pub fn login_url(url: String) -> LoginUrl {
   )
 }
 
+/// Chat-kind constraints for `switch_inline_query_chosen_chat`.
 pub type SwitchInlineChosenChat {
   SwitchInlineChosenChat(
     query: Option(String),
@@ -60,6 +107,7 @@ pub type SwitchInlineChosenChat {
   )
 }
 
+/// Create default `switch_inline_query_chosen_chat` options.
 pub fn switch_inline_chosen_chat() -> SwitchInlineChosenChat {
   SwitchInlineChosenChat(
     query: None,
@@ -70,12 +118,14 @@ pub fn switch_inline_chosen_chat() -> SwitchInlineChosenChat {
   )
 }
 
+/// An immutable inline keyboard built row by row.
 pub opaque type InlineKeyboard {
   /// Rows are stored in reverse order — newest first — so appending is
   /// cheap. We reverse on render.
   InlineKeyboard(reversed_rows: List(List(InlineKeyboardButton)))
 }
 
+/// Create an empty `InlineKeyboard`.
 pub fn inline() -> InlineKeyboard {
   InlineKeyboard(reversed_rows: [[]])
 }
@@ -85,6 +135,7 @@ pub fn inline_from(rows: List(List(InlineKeyboardButton))) -> InlineKeyboard {
   InlineKeyboard(reversed_rows: list.reverse(rows))
 }
 
+/// Append an inline callback button.
 pub fn inline_text(
   keyboard: InlineKeyboard,
   text: String,
@@ -93,6 +144,16 @@ pub fn inline_text(
   add_inline_button(keyboard, InlineCallback(text:, callback_data:))
 }
 
+/// Append an inline button that copies validated text to the clipboard.
+pub fn inline_copy(
+  keyboard: InlineKeyboard,
+  text: String,
+  copy_text: CopyText,
+) -> InlineKeyboard {
+  add_inline_button(keyboard, InlineCopy(text:, copy_text:))
+}
+
+/// Append an inline URL button.
 pub fn inline_url(
   keyboard: InlineKeyboard,
   text: String,
@@ -101,14 +162,16 @@ pub fn inline_url(
   add_inline_button(keyboard, InlineUrl(text:, url:))
 }
 
+/// Append an inline web-app button with a validated HTTPS target.
 pub fn inline_web_app(
   keyboard: InlineKeyboard,
   text: String,
-  url: String,
+  url: HttpsUrl,
 ) -> InlineKeyboard {
   add_inline_button(keyboard, InlineWebApp(text:, url:))
 }
 
+/// Append an inline login button.
 pub fn inline_login(
   keyboard: InlineKeyboard,
   text: String,
@@ -117,6 +180,7 @@ pub fn inline_login(
   add_inline_button(keyboard, InlineLoginUrl(text:, login_url: url))
 }
 
+/// Append a button that opens inline mode in another chat.
 pub fn inline_switch_inline(
   keyboard: InlineKeyboard,
   text: String,
@@ -125,6 +189,7 @@ pub fn inline_switch_inline(
   add_inline_button(keyboard, InlineSwitchInline(text:, query:))
 }
 
+/// Append a button that opens inline mode in the current chat.
 pub fn inline_switch_inline_current(
   keyboard: InlineKeyboard,
   text: String,
@@ -133,6 +198,7 @@ pub fn inline_switch_inline_current(
   add_inline_button(keyboard, InlineSwitchInlineCurrent(text:, query:))
 }
 
+/// Append a button with chosen-chat inline-mode options.
 pub fn inline_switch_inline_chosen(
   keyboard: InlineKeyboard,
   text: String,
@@ -141,12 +207,46 @@ pub fn inline_switch_inline_chosen(
   add_inline_button(keyboard, InlineSwitchInlineChosen(text:, options:))
 }
 
-pub fn inline_game(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
-  add_inline_button(keyboard, InlineGame(text:))
+/// Apply a Telegram style to an inline button without changing its action.
+pub fn inline_button_style(
+  button: InlineKeyboardButton,
+  style: ButtonStyle,
+) -> InlineKeyboardButton {
+  case button {
+    InlineDecorated(button:, icon_custom_emoji_id:, ..) ->
+      InlineDecorated(button:, style: Some(style), icon_custom_emoji_id:)
+    button ->
+      InlineDecorated(button:, style: Some(style), icon_custom_emoji_id: None)
+  }
 }
 
-pub fn inline_pay(keyboard: InlineKeyboard, text: String) -> InlineKeyboard {
-  add_inline_button(keyboard, InlinePay(text:))
+/// Add a custom emoji icon to an inline button without changing its action.
+pub fn inline_button_icon_custom_emoji(
+  button: InlineKeyboardButton,
+  icon_custom_emoji_id: String,
+) -> InlineKeyboardButton {
+  case button {
+    InlineDecorated(button:, style:, ..) ->
+      InlineDecorated(
+        button:,
+        style:,
+        icon_custom_emoji_id: Some(icon_custom_emoji_id),
+      )
+    button ->
+      InlineDecorated(
+        button:,
+        style: None,
+        icon_custom_emoji_id: Some(icon_custom_emoji_id),
+      )
+  }
+}
+
+/// Append an already constructed inline button.
+pub fn inline_button(
+  keyboard: InlineKeyboard,
+  button: InlineKeyboardButton,
+) -> InlineKeyboard {
+  add_inline_button(keyboard, button)
 }
 
 /// Start a new row. The next `inline_*` call adds a button to the new row.
@@ -169,9 +269,7 @@ fn add_inline_button(
 pub fn inline_rows(
   keyboard: InlineKeyboard,
 ) -> List(List(InlineKeyboardButton)) {
-  keyboard.reversed_rows
-  |> list.reverse
-  |> list.filter(fn(row) { row != [] })
+  materialise_rows(keyboard.reversed_rows)
 }
 
 /// Transpose the keyboard — flip rows and columns. Idempotent under
@@ -182,7 +280,8 @@ pub fn inline_transpose(keyboard: InlineKeyboard) -> InlineKeyboard {
 
 /// Wrap all buttons into rows of at most `cols` columns. If
 /// `fill_last_row` is `True` the first row absorbs the remainder; if
-/// `False` the last row may be shorter.
+/// `False` the last row may be shorter. A non-positive `cols` leaves
+/// all buttons in a single row.
 pub fn inline_flow(
   keyboard: InlineKeyboard,
   cols: Int,
@@ -200,6 +299,7 @@ pub fn inline_append(
   inline_from(list.append(inline_rows(keyboard), inline_rows(other)))
 }
 
+/// Render an `InlineKeyboard` as Telegram markup JSON.
 pub fn inline_to_json(keyboard: InlineKeyboard) -> json.Json {
   json.object([
     #(
@@ -212,58 +312,292 @@ pub fn inline_to_json(keyboard: InlineKeyboard) -> json.Json {
 }
 
 fn inline_button_to_json(button: InlineKeyboardButton) -> json.Json {
+  let ButtonFields(fields:, style:, icon_custom_emoji_id:) =
+    inline_button_fields(button)
+  json.object(
+    fields
+    |> json_utils.put_optional("style", style, button_style_to_json)
+    |> json_utils.put_optional(
+      "icon_custom_emoji_id",
+      icon_custom_emoji_id,
+      json.string,
+    ),
+  )
+}
+
+type ButtonFields {
+  ButtonFields(
+    fields: List(#(String, json.Json)),
+    style: Option(ButtonStyle),
+    icon_custom_emoji_id: Option(String),
+  )
+}
+
+fn inline_button_fields(button: InlineKeyboardButton) -> ButtonFields {
   case button {
     InlineUrl(text:, url:) ->
-      json.object([#("text", json.string(text)), #("url", json.string(url))])
+      plain_button_fields([
+        #("text", json.string(text)),
+        #("url", json.string(url)),
+      ])
     InlineCallback(text:, callback_data:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("callback_data", json.string(callback_data)),
       ])
-    InlineWebApp(text:, url:) ->
-      json.object([
+    InlineCopy(text:, copy_text:) ->
+      plain_button_fields([
         #("text", json.string(text)),
-        #("web_app", json.object([#("url", json.string(url))])),
+        #("copy_text", json.object([#("text", json.string(copy_text.value))])),
+      ])
+    InlineWebApp(text:, url:) ->
+      plain_button_fields([
+        #("text", json.string(text)),
+        #(
+          "web_app",
+          json.object([#("url", json.string(https_url.to_string(url)))]),
+        ),
       ])
     InlineLoginUrl(text:, login_url:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("login_url", login_url_to_json(login_url)),
       ])
     InlineSwitchInline(text:, query:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("switch_inline_query", json.string(query)),
       ])
     InlineSwitchInlineCurrent(text:, query:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("switch_inline_query_current_chat", json.string(query)),
       ])
     InlineSwitchInlineChosen(text:, options:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #(
           "switch_inline_query_chosen_chat",
           switch_inline_chosen_chat_to_json(options),
         ),
       ])
-    InlineGame(text:) ->
-      json.object([
-        #("text", json.string(text)),
-        #("callback_game", json.object([])),
-      ])
-    InlinePay(text:) ->
-      json.object([#("text", json.string(text)), #("pay", json.bool(True))])
+    InlineDecorated(button:, style:, icon_custom_emoji_id:) -> {
+      let ButtonFields(
+        fields:,
+        style: inner_style,
+        icon_custom_emoji_id: inner_icon,
+      ) = inline_button_fields(button)
+      ButtonFields(
+        fields:,
+        style: prefer(style, inner_style),
+        icon_custom_emoji_id: prefer(icon_custom_emoji_id, inner_icon),
+      )
+    }
   }
+}
+
+fn plain_button_fields(fields: List(#(String, json.Json))) -> ButtonFields {
+  ButtonFields(fields:, style: None, icon_custom_emoji_id: None)
+}
+
+fn prefer(value: Option(a), fallback: Option(a)) -> Option(a) {
+  case value {
+    Some(_) -> value
+    None -> fallback
+  }
+}
+
+fn button_style_to_json(style: ButtonStyle) -> json.Json {
+  json.string(case style {
+    Danger -> "danger"
+    Success -> "success"
+    Primary -> "primary"
+  })
+}
+
+// =====================================================================
+//                   Endpoint-specific inline keyboards
+// =====================================================================
+
+/// An inline keyboard accepted by `sendGame`.
+///
+/// Telegram requires the callback-game button to be the first button in the
+/// first row. The constructor is private so normal keyboard operations cannot
+/// move it away from that position.
+pub opaque type GameInlineKeyboard {
+  GameInlineKeyboard(
+    text: String,
+    trailing: InlineKeyboard,
+    style: Option(ButtonStyle),
+    icon_custom_emoji_id: Option(String),
+  )
+}
+
+/// Build a game keyboard containing only the required callback-game button.
+pub fn game_inline_keyboard(text: String) -> GameInlineKeyboard {
+  game_inline_keyboard_with(text, inline())
+}
+
+/// Prefix a normal inline keyboard with the required callback-game button.
+///
+/// The supplied keyboard is kept as trailing rows, so transpose, flow, and
+/// append operations performed before wrapping cannot break the game-button
+/// position invariant.
+pub fn game_inline_keyboard_with(
+  text: String,
+  trailing: InlineKeyboard,
+) -> GameInlineKeyboard {
+  GameInlineKeyboard(text:, trailing:, style: None, icon_custom_emoji_id: None)
+}
+
+/// Apply a Telegram style to the required callback-game button.
+pub fn game_button_style(
+  keyboard: GameInlineKeyboard,
+  style: ButtonStyle,
+) -> GameInlineKeyboard {
+  GameInlineKeyboard(..keyboard, style: Some(style))
+}
+
+/// Add a custom emoji icon to the required callback-game button.
+pub fn game_button_icon_custom_emoji(
+  keyboard: GameInlineKeyboard,
+  icon_custom_emoji_id: String,
+) -> GameInlineKeyboard {
+  GameInlineKeyboard(
+    ..keyboard,
+    icon_custom_emoji_id: Some(icon_custom_emoji_id),
+  )
+}
+
+/// Encode a game-specific inline keyboard for the Bot API.
+pub fn game_inline_keyboard_to_json(keyboard: GameInlineKeyboard) -> json.Json {
+  endpoint_inline_to_json(
+    special_row: json.array([keyboard.text], fn(text) {
+      json.object(
+        [
+          #("text", json.string(text)),
+          #("callback_game", json.object([])),
+        ]
+        |> json_utils.put_optional(
+          "style",
+          keyboard.style,
+          button_style_to_json,
+        )
+        |> json_utils.put_optional(
+          "icon_custom_emoji_id",
+          keyboard.icon_custom_emoji_id,
+          json.string,
+        ),
+      )
+    }),
+    trailing: keyboard.trailing,
+  )
+}
+
+/// An inline keyboard accepted by `sendInvoice`.
+///
+/// Telegram requires the pay button to be the first button in the first row.
+/// The constructor is private so normal keyboard operations cannot move it
+/// away from that position.
+pub opaque type InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(
+    text: String,
+    trailing: InlineKeyboard,
+    style: Option(ButtonStyle),
+    icon_custom_emoji_id: Option(String),
+  )
+}
+
+/// Build an invoice keyboard containing only the required pay button.
+pub fn invoice_inline_keyboard(text: String) -> InvoiceInlineKeyboard {
+  invoice_inline_keyboard_with(text, inline())
+}
+
+/// Prefix a normal inline keyboard with the required pay button.
+///
+/// The supplied keyboard is kept as trailing rows, so transpose, flow, and
+/// append operations performed before wrapping cannot break the pay-button
+/// position invariant.
+pub fn invoice_inline_keyboard_with(
+  text: String,
+  trailing: InlineKeyboard,
+) -> InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(
+    text:,
+    trailing:,
+    style: None,
+    icon_custom_emoji_id: None,
+  )
+}
+
+/// Apply a Telegram style to the required pay button.
+pub fn invoice_button_style(
+  keyboard: InvoiceInlineKeyboard,
+  style: ButtonStyle,
+) -> InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(..keyboard, style: Some(style))
+}
+
+/// Add a custom emoji icon to the required pay button.
+pub fn invoice_button_icon_custom_emoji(
+  keyboard: InvoiceInlineKeyboard,
+  icon_custom_emoji_id: String,
+) -> InvoiceInlineKeyboard {
+  InvoiceInlineKeyboard(
+    ..keyboard,
+    icon_custom_emoji_id: Some(icon_custom_emoji_id),
+  )
+}
+
+/// Encode an invoice-specific inline keyboard for the Bot API.
+pub fn invoice_inline_keyboard_to_json(
+  keyboard: InvoiceInlineKeyboard,
+) -> json.Json {
+  endpoint_inline_to_json(
+    special_row: json.array([keyboard.text], fn(text) {
+      json.object(
+        [
+          #("text", json.string(text)),
+          #("pay", json.bool(True)),
+        ]
+        |> json_utils.put_optional(
+          "style",
+          keyboard.style,
+          button_style_to_json,
+        )
+        |> json_utils.put_optional(
+          "icon_custom_emoji_id",
+          keyboard.icon_custom_emoji_id,
+          json.string,
+        ),
+      )
+    }),
+    trailing: keyboard.trailing,
+  )
+}
+
+fn endpoint_inline_to_json(
+  special_row special_row: json.Json,
+  trailing trailing: InlineKeyboard,
+) -> json.Json {
+  let trailing_rows =
+    trailing
+    |> inline_rows
+    |> list.map(fn(row) { json.array(row, inline_button_to_json) })
+  json.object([
+    #(
+      "inline_keyboard",
+      json.array([special_row, ..trailing_rows], fn(row) { row }),
+    ),
+  ])
 }
 
 fn login_url_to_json(url: LoginUrl) -> json.Json {
   json.object(
-    [#("url", json.string(url.url))]
-    |> append_optional("forward_text", url.forward_text, json.string)
-    |> append_optional("bot_username", url.bot_username, json.string)
-    |> append_optional(
+    [#("url", json.string(https_url.to_string(url.url)))]
+    |> json_utils.put_optional("forward_text", url.forward_text, json.string)
+    |> json_utils.put_optional("bot_username", url.bot_username, json.string)
+    |> json_utils.put_optional(
       "request_write_access",
       url.request_write_access,
       json.bool,
@@ -274,11 +608,23 @@ fn login_url_to_json(url: LoginUrl) -> json.Json {
 fn switch_inline_chosen_chat_to_json(o: SwitchInlineChosenChat) -> json.Json {
   json.object(
     []
-    |> append_optional("query", o.query, json.string)
-    |> append_optional("allow_user_chats", o.allow_user_chats, json.bool)
-    |> append_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
-    |> append_optional("allow_group_chats", o.allow_group_chats, json.bool)
-    |> append_optional("allow_channel_chats", o.allow_channel_chats, json.bool),
+    |> json_utils.put_optional("query", o.query, json.string)
+    |> json_utils.put_optional(
+      "allow_user_chats",
+      o.allow_user_chats,
+      json.bool,
+    )
+    |> json_utils.put_optional("allow_bot_chats", o.allow_bot_chats, json.bool)
+    |> json_utils.put_optional(
+      "allow_group_chats",
+      o.allow_group_chats,
+      json.bool,
+    )
+    |> json_utils.put_optional(
+      "allow_channel_chats",
+      o.allow_channel_chats,
+      json.bool,
+    ),
   )
 }
 
@@ -286,17 +632,24 @@ fn switch_inline_chosen_chat_to_json(o: SwitchInlineChosenChat) -> json.Json {
 //                           ReplyKeyboard
 // =====================================================================
 
+/// One button in a custom reply keyboard row.
 pub type ReplyKeyboardButton {
   ReplyText(text: String)
   ReplyRequestContact(text: String)
   ReplyRequestLocation(text: String)
-  ReplyRequestPoll(text: String, type_: Option(String))
-  ReplyWebApp(text: String, url: String)
+  ReplyRequestPoll(text: String, type_: Option(InputPollKind))
+  ReplyWebApp(text: String, url: HttpsUrl)
   ReplyRequestUsers(text: String, request_id: Int, user_is_bot: Option(Bool))
   ReplyRequestChat(text: String, request_id: Int, chat_is_channel: Bool)
   ReplyRequestManagedBot(text: String, request_id: Int)
+  ReplyDecorated(
+    button: ReplyKeyboardButton,
+    style: Option(ButtonStyle),
+    icon_custom_emoji_id: Option(String),
+  )
 }
 
+/// An immutable custom reply keyboard and its display options.
 pub opaque type ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: List(List(ReplyKeyboardButton)),
@@ -308,6 +661,7 @@ pub opaque type ReplyKeyboard {
   )
 }
 
+/// Create an empty `ReplyKeyboard`.
 pub fn reply() -> ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: [[]],
@@ -319,6 +673,7 @@ pub fn reply() -> ReplyKeyboard {
   )
 }
 
+/// Build a `ReplyKeyboard` from a list of rows of buttons.
 pub fn reply_from(rows: List(List(ReplyKeyboardButton))) -> ReplyKeyboard {
   ReplyKeyboard(
     reversed_rows: list.reverse(rows),
@@ -330,10 +685,12 @@ pub fn reply_from(rows: List(List(ReplyKeyboardButton))) -> ReplyKeyboard {
   )
 }
 
+/// Append a plain reply-keyboard text button.
 pub fn reply_text(keyboard: ReplyKeyboard, text: String) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyText(text:))
 }
 
+/// Append a reply button that requests the user's contact.
 pub fn reply_request_contact(
   keyboard: ReplyKeyboard,
   text: String,
@@ -341,6 +698,7 @@ pub fn reply_request_contact(
   add_reply_button(keyboard, ReplyRequestContact(text:))
 }
 
+/// Append a reply button that requests the user's location.
 pub fn reply_request_location(
   keyboard: ReplyKeyboard,
   text: String,
@@ -348,22 +706,25 @@ pub fn reply_request_location(
   add_reply_button(keyboard, ReplyRequestLocation(text:))
 }
 
+/// Append a reply button that requests poll creation.
 pub fn reply_request_poll(
   keyboard: ReplyKeyboard,
   text: String,
-  type_ type_: Option(String),
+  type_ type_: Option(InputPollKind),
 ) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyRequestPoll(text:, type_:))
 }
 
+/// Append a reply web-app button with a validated HTTPS target.
 pub fn reply_web_app(
   keyboard: ReplyKeyboard,
   text: String,
-  url: String,
+  url: HttpsUrl,
 ) -> ReplyKeyboard {
   add_reply_button(keyboard, ReplyWebApp(text:, url:))
 }
 
+/// Append a reply button that requests users.
 pub fn reply_request_users(
   keyboard: ReplyKeyboard,
   text: String,
@@ -376,6 +737,7 @@ pub fn reply_request_users(
   )
 }
 
+/// Append a reply button that requests a chat.
 pub fn reply_request_chat(
   keyboard: ReplyKeyboard,
   text: String,
@@ -388,6 +750,7 @@ pub fn reply_request_chat(
   )
 }
 
+/// Append a reply button that requests a managed bot.
 pub fn reply_request_managed_bot(
   keyboard: ReplyKeyboard,
   text: String,
@@ -396,26 +759,74 @@ pub fn reply_request_managed_bot(
   add_reply_button(keyboard, ReplyRequestManagedBot(text:, request_id:))
 }
 
+/// Apply a Telegram style to a reply button without changing its action.
+pub fn reply_button_style(
+  button: ReplyKeyboardButton,
+  style: ButtonStyle,
+) -> ReplyKeyboardButton {
+  case button {
+    ReplyDecorated(button:, icon_custom_emoji_id:, ..) ->
+      ReplyDecorated(button:, style: Some(style), icon_custom_emoji_id:)
+    button ->
+      ReplyDecorated(button:, style: Some(style), icon_custom_emoji_id: None)
+  }
+}
+
+/// Add a custom emoji icon to a reply button without changing its action.
+pub fn reply_button_icon_custom_emoji(
+  button: ReplyKeyboardButton,
+  icon_custom_emoji_id: String,
+) -> ReplyKeyboardButton {
+  case button {
+    ReplyDecorated(button:, style:, ..) ->
+      ReplyDecorated(
+        button:,
+        style:,
+        icon_custom_emoji_id: Some(icon_custom_emoji_id),
+      )
+    button ->
+      ReplyDecorated(
+        button:,
+        style: None,
+        icon_custom_emoji_id: Some(icon_custom_emoji_id),
+      )
+  }
+}
+
+/// Append an already constructed reply button.
+pub fn reply_button(
+  keyboard: ReplyKeyboard,
+  button: ReplyKeyboardButton,
+) -> ReplyKeyboard {
+  add_reply_button(keyboard, button)
+}
+
+/// Start a new reply-keyboard row.
 pub fn reply_row(keyboard: ReplyKeyboard) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, reversed_rows: [[], ..keyboard.reversed_rows])
 }
 
+/// Set Telegram's `resize_keyboard` option.
 pub fn reply_resize(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, resize: Some(value))
 }
 
+/// Set Telegram's `one_time_keyboard` option.
 pub fn reply_one_time(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, one_time: Some(value))
 }
 
+/// Set Telegram's `selective` option.
 pub fn reply_selective(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, selective: Some(value))
 }
 
+/// Set Telegram's `is_persistent` option.
 pub fn reply_persistent(keyboard: ReplyKeyboard, value: Bool) -> ReplyKeyboard {
   ReplyKeyboard(..keyboard, is_persistent: Some(value))
 }
 
+/// Set the input-field placeholder shown with the reply keyboard.
 pub fn reply_placeholder(
   keyboard: ReplyKeyboard,
   text: String,
@@ -437,17 +848,19 @@ fn add_reply_button(
   }
 }
 
+/// Return the reply keyboard rows in display order. Useful for tests.
 pub fn reply_rows(keyboard: ReplyKeyboard) -> List(List(ReplyKeyboardButton)) {
-  keyboard.reversed_rows
-  |> list.reverse
-  |> list.filter(fn(row) { row != [] })
+  materialise_rows(keyboard.reversed_rows)
 }
 
+/// Transpose the reply keyboard rows.
 pub fn reply_transpose(keyboard: ReplyKeyboard) -> ReplyKeyboard {
   let rows = transpose(reply_rows(keyboard))
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Wrap reply-keyboard buttons into rows of at most `cols` columns.
+/// A non-positive `cols` leaves all buttons in a single row.
 pub fn reply_flow(
   keyboard: ReplyKeyboard,
   cols: Int,
@@ -458,6 +871,7 @@ pub fn reply_flow(
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Append another reply keyboard's rows to this one.
 pub fn reply_append(
   keyboard: ReplyKeyboard,
   other: ReplyKeyboard,
@@ -466,6 +880,7 @@ pub fn reply_append(
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
+/// Render a `ReplyKeyboard` as Telegram markup JSON.
 pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
   let base = [
     #(
@@ -477,11 +892,19 @@ pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
   ]
   let with_extras =
     base
-    |> append_optional("resize_keyboard", keyboard.resize, json.bool)
-    |> append_optional("one_time_keyboard", keyboard.one_time, json.bool)
-    |> append_optional("selective", keyboard.selective, json.bool)
-    |> append_optional("is_persistent", keyboard.is_persistent, json.bool)
-    |> append_optional(
+    |> json_utils.put_optional("resize_keyboard", keyboard.resize, json.bool)
+    |> json_utils.put_optional(
+      "one_time_keyboard",
+      keyboard.one_time,
+      json.bool,
+    )
+    |> json_utils.put_optional("selective", keyboard.selective, json.bool)
+    |> json_utils.put_optional(
+      "is_persistent",
+      keyboard.is_persistent,
+      json.bool,
+    )
+    |> json_utils.put_optional(
       "input_field_placeholder",
       keyboard.input_field_placeholder,
       json.string,
@@ -490,47 +913,66 @@ pub fn reply_to_json(keyboard: ReplyKeyboard) -> json.Json {
 }
 
 fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
+  let ButtonFields(fields:, style:, icon_custom_emoji_id:) =
+    reply_button_fields(button)
+  json.object(
+    fields
+    |> json_utils.put_optional("style", style, button_style_to_json)
+    |> json_utils.put_optional(
+      "icon_custom_emoji_id",
+      icon_custom_emoji_id,
+      json.string,
+    ),
+  )
+}
+
+fn reply_button_fields(button: ReplyKeyboardButton) -> ButtonFields {
   case button {
-    ReplyText(text:) -> json.object([#("text", json.string(text))])
+    ReplyText(text:) -> plain_button_fields([#("text", json.string(text))])
     ReplyRequestContact(text:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("request_contact", json.bool(True)),
       ])
     ReplyRequestLocation(text:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #("request_location", json.bool(True)),
       ])
     ReplyRequestPoll(text:, type_:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #(
           "request_poll",
           json.object(case type_ {
-            Some(t) -> [#("type", json.string(t))]
+            Some(t) -> [
+              #("type", json.string(types.input_poll_kind_to_string(t))),
+            ]
             None -> []
           }),
         ),
       ])
     ReplyWebApp(text:, url:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
-        #("web_app", json.object([#("url", json.string(url))])),
+        #(
+          "web_app",
+          json.object([#("url", json.string(https_url.to_string(url)))]),
+        ),
       ])
     ReplyRequestUsers(text:, request_id:, user_is_bot:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #(
           "request_users",
           json.object(
             [#("request_id", json.int(request_id))]
-            |> append_optional("user_is_bot", user_is_bot, json.bool),
+            |> json_utils.put_optional("user_is_bot", user_is_bot, json.bool),
           ),
         ),
       ])
     ReplyRequestChat(text:, request_id:, chat_is_channel:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #(
           "request_chat",
@@ -541,13 +983,25 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
         ),
       ])
     ReplyRequestManagedBot(text:, request_id:) ->
-      json.object([
+      plain_button_fields([
         #("text", json.string(text)),
         #(
           "request_managed_bot",
           json.object([#("request_id", json.int(request_id))]),
         ),
       ])
+    ReplyDecorated(button:, style:, icon_custom_emoji_id:) -> {
+      let ButtonFields(
+        fields:,
+        style: inner_style,
+        icon_custom_emoji_id: inner_icon,
+      ) = reply_button_fields(button)
+      ButtonFields(
+        fields:,
+        style: prefer(style, inner_style),
+        icon_custom_emoji_id: prefer(icon_custom_emoji_id, inner_icon),
+      )
+    }
   }
 }
 
@@ -555,17 +1009,83 @@ fn reply_button_to_json(button: ReplyKeyboardButton) -> json.Json {
 //                        Markup helpers
 // =====================================================================
 
-pub fn remove_keyboard() -> json.Json {
-  json.object([#("remove_keyboard", json.bool(True))])
+/// Telegram's four reply-markup shapes accepted by message-send methods.
+pub type ReplyMarkup {
+  /// An inline keyboard attached below a message.
+  InlineKeyboardMarkup(InlineKeyboard)
+  /// A custom reply keyboard replacing the user's system keyboard.
+  ReplyKeyboardMarkup(ReplyKeyboard)
+  /// Remove a previously displayed custom reply keyboard.
+  ReplyKeyboardRemove(selective: Option(Bool))
+  /// Ask the client to open its reply UI for the message.
+  ForceReply(input_field_placeholder: Option(String), selective: Option(Bool))
 }
 
-pub fn force_reply() -> json.Json {
-  json.object([#("force_reply", json.bool(True))])
+/// Attach an inline keyboard as typed reply markup.
+pub fn inline_markup(keyboard: InlineKeyboard) -> ReplyMarkup {
+  InlineKeyboardMarkup(keyboard)
+}
+
+/// Attach a custom reply keyboard as typed reply markup.
+pub fn reply_markup(keyboard: ReplyKeyboard) -> ReplyMarkup {
+  ReplyKeyboardMarkup(keyboard)
+}
+
+/// Remove the current custom reply keyboard.
+pub fn remove_keyboard() -> ReplyMarkup {
+  ReplyKeyboardRemove(selective: None)
+}
+
+/// Remove the keyboard only for selected users.
+pub fn remove_keyboard_selective(selective: Bool) -> ReplyMarkup {
+  ReplyKeyboardRemove(selective: Some(selective))
+}
+
+/// Force the user to reply without extra options.
+pub fn force_reply() -> ReplyMarkup {
+  ForceReply(input_field_placeholder: None, selective: None)
+}
+
+/// Force a reply with explicit placeholder and selection behaviour.
+pub fn force_reply_with(
+  input_field_placeholder: Option(String),
+  selective: Option(Bool),
+) -> ReplyMarkup {
+  ForceReply(input_field_placeholder:, selective:)
+}
+
+/// Encode typed reply markup for the Bot API.
+pub fn reply_markup_to_json(markup: ReplyMarkup) -> json.Json {
+  case markup {
+    InlineKeyboardMarkup(keyboard) -> inline_to_json(keyboard)
+    ReplyKeyboardMarkup(keyboard) -> reply_to_json(keyboard)
+    ReplyKeyboardRemove(selective:) ->
+      json.object(
+        [#("remove_keyboard", json.bool(True))]
+        |> json_utils.put_optional("selective", selective, json.bool),
+      )
+    ForceReply(input_field_placeholder:, selective:) ->
+      json.object(
+        [#("force_reply", json.bool(True))]
+        |> json_utils.put_optional(
+          "input_field_placeholder",
+          input_field_placeholder,
+          json.string,
+        )
+        |> json_utils.put_optional("selective", selective, json.bool),
+      )
+  }
 }
 
 // =====================================================================
 //                          internal helpers
 // =====================================================================
+
+fn materialise_rows(reversed_rows: List(List(a))) -> List(List(a)) {
+  reversed_rows
+  |> list.reverse
+  |> list.filter(fn(row) { row != [] })
+}
 
 fn transpose(matrix: List(List(a))) -> List(List(a)) {
   case matrix {
@@ -648,17 +1168,5 @@ fn take_n(items: List(a), n: Int) -> #(List(a), List(a)) {
       let #(taken, remainder) = take_n(rest, n - 1)
       #([head, ..taken], remainder)
     }
-  }
-}
-
-fn append_optional(
-  fields: List(#(String, json.Json)),
-  key: String,
-  value: Option(a),
-  encoder: fn(a) -> json.Json,
-) -> List(#(String, json.Json)) {
-  case value {
-    None -> fields
-    Some(v) -> list.append(fields, [#(key, encoder(v))])
   }
 }

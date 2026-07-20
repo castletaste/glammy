@@ -2,10 +2,13 @@
 //// grammY tests use mutable builder objects; we test equivalent
 //// behaviour via the JSON-output round-trip.
 
+import glammy/https_url
 import glammy/keyboard
+import glammy/types
 import gleam/json
 import gleam/list
 import gleam/option.{Some}
+import gleam/string
 
 fn render_inline(k: keyboard.InlineKeyboard) -> String {
   json.to_string(keyboard.inline_to_json(k))
@@ -39,13 +42,14 @@ pub fn keyboard_creates_rows_and_columns_test() {
 }
 
 pub fn keyboard_supports_different_buttons_test() {
+  let assert Ok(web_app_url) = https_url.new("https://grammy.dev")
   let k =
     keyboard.reply()
     |> keyboard.reply_text("button")
     |> keyboard.reply_request_contact("contact")
     |> keyboard.reply_request_location("location")
-    |> keyboard.reply_request_poll("poll", type_: Some("quiz"))
-    |> keyboard.reply_web_app("web app", "https://grammy.dev")
+    |> keyboard.reply_request_poll("poll", type_: Some(types.QuizInputPoll))
+    |> keyboard.reply_web_app("web app", web_app_url)
     |> keyboard.reply_request_users(
       "user",
       request_id: 12,
@@ -71,6 +75,27 @@ pub fn keyboard_supports_different_buttons_test() {
   assert render_reply(k) == expected
 }
 
+pub fn copy_text_validates_telegram_character_bounds_test() {
+  assert keyboard.copy_text("") == Error(keyboard.EmptyCopyText)
+  assert keyboard.copy_text(string.repeat("x", 257))
+    == Error(keyboard.CopyTextTooLong(257))
+
+  let assert Ok(maximum) = keyboard.copy_text(string.repeat("x", 256))
+  assert keyboard.copy_text_value(maximum) == string.repeat("x", 256)
+}
+
+pub fn reply_button_appearance_has_exact_payload_test() {
+  let decorated =
+    keyboard.ReplyRequestContact(text: "Share")
+    |> keyboard.reply_button_style(keyboard.Success)
+    |> keyboard.reply_button_icon_custom_emoji("emoji-reply")
+  let rendered =
+    keyboard.reply() |> keyboard.reply_button(decorated) |> render_reply
+
+  assert rendered
+    == "{\"keyboard\":[[{\"text\":\"Share\",\"request_contact\":true,\"style\":\"success\",\"icon_custom_emoji_id\":\"emoji-reply\"}]]}"
+}
+
 pub fn keyboard_supports_reply_markup_options_test() {
   let k =
     keyboard.reply()
@@ -88,6 +113,7 @@ pub fn keyboard_supports_reply_markup_options_test() {
   let assert True = string_contains(rendered, "\"resize_keyboard\":false")
   let assert True =
     string_contains(rendered, "\"input_field_placeholder\":\"placeholder\"")
+  let assert False = string_contains(rendered, "\"pay\":true")
 }
 
 pub fn keyboard_can_be_transposed_test() {
@@ -231,9 +257,10 @@ pub fn inline_creates_rows_and_columns_test() {
 }
 
 pub fn inline_supports_different_buttons_test() {
+  let assert Ok(web_app_url) = https_url.new("https://grammy.dev")
   let login =
     keyboard.LoginUrl(
-      url: "https://grammy.dev",
+      url: web_app_url,
       forward_text: Some("forward"),
       bot_username: Some("bot"),
       request_write_access: Some(True),
@@ -249,8 +276,8 @@ pub fn inline_supports_different_buttons_test() {
     |> keyboard.inline_url("url", "https://grammy.dev")
     |> keyboard.inline_text("button", "button")
     |> keyboard.inline_text("button", "data")
-    |> keyboard.inline_web_app("web app", "https://grammy.dev")
-    |> keyboard.inline_login("login", keyboard.login_url("https://grammy.dev"))
+    |> keyboard.inline_web_app("web app", web_app_url)
+    |> keyboard.inline_login("login", keyboard.login_url(web_app_url))
     |> keyboard.inline_login("login", login)
     |> keyboard.inline_switch_inline("inline", "")
     |> keyboard.inline_switch_inline("inline", "query")
@@ -261,8 +288,6 @@ pub fn inline_supports_different_buttons_test() {
       "inline chosen chat",
       chosen_with_bots,
     )
-    |> keyboard.inline_game("game")
-    |> keyboard.inline_pay("pay")
 
   let rendered = render_inline(k)
   let assert True = string_contains(rendered, "\"url\":\"https://grammy.dev\"")
@@ -274,8 +299,80 @@ pub fn inline_supports_different_buttons_test() {
     string_contains(rendered, "\"switch_inline_query_current_chat\":\"query\"")
   let assert True =
     string_contains(rendered, "\"switch_inline_query_chosen_chat\":")
-  let assert True = string_contains(rendered, "\"callback_game\":{}")
-  let assert True = string_contains(rendered, "\"pay\":true")
+  let assert False = string_contains(rendered, "\"callback_game\":{}")
+  let assert False = string_contains(rendered, "\"pay\":true")
+}
+
+pub fn inline_copy_and_appearance_have_exact_payload_test() {
+  let assert Ok(value) = keyboard.copy_text("secret value")
+  let copy_button =
+    keyboard.InlineCopy(text: "Copy", copy_text: value)
+    |> keyboard.inline_button_style(keyboard.Primary)
+    |> keyboard.inline_button_icon_custom_emoji("emoji-inline")
+  let rendered =
+    keyboard.inline() |> keyboard.inline_button(copy_button) |> render_inline
+
+  assert rendered
+    == "{\"inline_keyboard\":[[{\"text\":\"Copy\",\"copy_text\":{\"text\":\"secret value\"},\"style\":\"primary\",\"icon_custom_emoji_id\":\"emoji-inline\"}]]}"
+}
+
+pub fn game_inline_keyboard_keeps_special_button_first_test() {
+  let trailing =
+    keyboard.inline()
+    |> keyboard.inline_text("callback", "data")
+    |> keyboard.inline_row
+    |> keyboard.inline_url("docs", "https://core.telegram.org/bots/api")
+  let rendered =
+    keyboard.game_inline_keyboard_with("play", trailing)
+    |> keyboard.game_inline_keyboard_to_json
+    |> json.to_string
+  assert rendered
+    == "{\"inline_keyboard\":[[{\"text\":\"play\",\"callback_game\":{}}],[{\"text\":\"callback\",\"callback_data\":\"data\"}],[{\"text\":\"docs\",\"url\":\"https://core.telegram.org/bots/api\"}]]}"
+}
+
+pub fn invoice_inline_keyboard_keeps_special_button_first_test() {
+  let trailing =
+    keyboard.inline()
+    |> keyboard.inline_text("receipt", "receipt")
+  let rendered =
+    keyboard.invoice_inline_keyboard_with("pay", trailing)
+    |> keyboard.invoice_inline_keyboard_to_json
+    |> json.to_string
+  assert rendered
+    == "{\"inline_keyboard\":[[{\"text\":\"pay\",\"pay\":true}],[{\"text\":\"receipt\",\"callback_data\":\"receipt\"}]]}"
+}
+
+pub fn endpoint_inline_keyboards_can_contain_only_special_button_test() {
+  assert keyboard.game_inline_keyboard("play")
+    |> keyboard.game_inline_keyboard_to_json
+    |> json.to_string
+    == "{\"inline_keyboard\":[[{\"text\":\"play\",\"callback_game\":{}}]]}"
+  assert keyboard.invoice_inline_keyboard("pay")
+    |> keyboard.invoice_inline_keyboard_to_json
+    |> json.to_string
+    == "{\"inline_keyboard\":[[{\"text\":\"pay\",\"pay\":true}]]}"
+}
+
+pub fn endpoint_button_appearance_keeps_special_actions_first_test() {
+  let assert Ok(copy_value) = keyboard.copy_text("receipt")
+  let trailing = keyboard.inline() |> keyboard.inline_copy("copy", copy_value)
+  let game =
+    keyboard.game_inline_keyboard_with("play", trailing)
+    |> keyboard.game_button_style(keyboard.Danger)
+    |> keyboard.game_button_icon_custom_emoji("emoji-game")
+    |> keyboard.game_inline_keyboard_to_json
+    |> json.to_string
+  assert game
+    == "{\"inline_keyboard\":[[{\"text\":\"play\",\"callback_game\":{},\"style\":\"danger\",\"icon_custom_emoji_id\":\"emoji-game\"}],[{\"text\":\"copy\",\"copy_text\":{\"text\":\"receipt\"}}]]}"
+
+  let invoice =
+    keyboard.invoice_inline_keyboard_with("pay", trailing)
+    |> keyboard.invoice_button_style(keyboard.Success)
+    |> keyboard.invoice_button_icon_custom_emoji("emoji-pay")
+    |> keyboard.invoice_inline_keyboard_to_json
+    |> json.to_string
+  assert invoice
+    == "{\"inline_keyboard\":[[{\"text\":\"pay\",\"pay\":true,\"style\":\"success\",\"icon_custom_emoji_id\":\"emoji-pay\"}],[{\"text\":\"copy\",\"copy_text\":{\"text\":\"receipt\"}}]]}"
 }
 
 pub fn inline_can_be_transposed_test() {
@@ -324,21 +421,21 @@ pub fn inline_can_be_appended_test() {
 // =====================================================================
 
 pub fn remove_keyboard_test() {
-  assert json.to_string(keyboard.remove_keyboard())
+  assert json.to_string(
+      keyboard.remove_keyboard() |> keyboard.reply_markup_to_json,
+    )
     == "{\"remove_keyboard\":true}"
 }
 
 pub fn force_reply_test() {
-  assert json.to_string(keyboard.force_reply()) == "{\"force_reply\":true}"
+  assert json.to_string(keyboard.force_reply() |> keyboard.reply_markup_to_json)
+    == "{\"force_reply\":true}"
 }
 
 // =====================================================================
 //                          helpers
 // =====================================================================
 
-@external(erlang, "string", "find")
-fn raw_find(haystack: String, needle: String) -> String
-
 fn string_contains(haystack: String, needle: String) -> Bool {
-  raw_find(haystack, needle) != "nomatch"
+  string.contains(haystack, needle)
 }

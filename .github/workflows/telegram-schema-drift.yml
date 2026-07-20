@@ -1,0 +1,44 @@
+name: Telegram Bot API schema drift
+
+on:
+  schedule:
+    - cron: "17 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-schema-drift
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Compare official schema with baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Test deterministic parser against local fixtures
+        run: python3 -m unittest discover -s scripts/tests -p 'test_telegram_bot_api_schema.py'
+      - name: Compare live Bot API schema
+        id: schema
+        continue-on-error: true
+        run: >-
+          python3 scripts/telegram_bot_api_schema.py check
+          --report "$RUNNER_TEMP/telegram-bot-api-drift.md"
+      - name: Publish drift report to job summary
+        if: always()
+        env:
+          REPORT: ${{ runner.temp }}/telegram-bot-api-drift.md
+        run: |
+          if [ -f "$REPORT" ]; then
+            cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Schema guard did not produce a report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Enforce live comparison result
+        if: steps.schema.outcome != 'success'
+        run: exit 1

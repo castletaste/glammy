@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <h3>Recent changes</h3>
+    <h4><a href="#july-14-2026">July 14, 2026</a></h4>
+    <p>Bot API <strong>10.2</strong></p>
+
+    <h3>Getting updates</h3>
+    <h4><a href="#update">Update</a></h4>
+    <p>This object represents an incoming update.</p>
+    <table class="table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>update_id</td><td>Integer</td><td>Unique identifier.</td></tr>
+        <tr>
+          <td>message</td>
+          <td><a href="#message">Message</a></td>
+          <td><em>Optional</em>. New incoming message.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4><a href="#getupdates">getUpdates</a></h4>
+    <p>Use this method to receive incoming updates.</p>
+    <table class="table">
+      <thead>
+        <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>offset</td><td>Integer</td><td>Optional</td><td>First update.</td></tr>
+        <tr><td>timeout</td><td>Integer</td><td>Yes</td><td>Timeout.</td></tr>
+      </tbody>
+    </table>
+
+    <h4><a href="#getme">getMe</a></h4>
+    <p>A simple method with no parameters.</p>
+
+    <h3>Available types</h3>
+    <h4><a href="#message">Message</a></h4>
+    <table class="table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>message_id</td><td>Integer</td><td>Unique message identifier.</td></tr>
+      </tbody>
+    </table>
+
+    <h4><a href="#maybeinaccessiblemessage">MaybeInaccessibleMessage</a></h4>
+    <p>This object describes a message that can be inaccessible.</p>
+
+    <h4><a href="#markdownv2-style">MarkdownV2 style</a></h4>
+    <p>This prose heading is not a Bot API type.</p>
+  </body>
+</html>

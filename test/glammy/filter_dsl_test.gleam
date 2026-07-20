@@ -1,20 +1,8 @@
 //// Tests for the glammy filter-query DSL. Mirror the grammY suite
 //// (`test/filter.test.ts`) one-for-one where the behaviour applies.
 
-import glammy/api
-import glammy/context
 import glammy/filter
-import glammy/types.{type Update}
-import gleam/json
-
-fn make(body: String) -> Update {
-  let assert Ok(u) = json.parse(body, types.update_decoder())
-  u
-}
-
-fn ctx(u: Update) -> context.Context {
-  context.new(u, api.new("0:test"))
-}
+import glammy/helpers.{ctx_from}
 
 const message_text_body = "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}"
 
@@ -22,9 +10,13 @@ const message_photo_body = "{\"update_id\":2,\"message\":{\"message_id\":2,\"cha
 
 const callback_body = "{\"update_id\":3,\"callback_query\":{\"id\":\"x\",\"from\":{\"id\":1,\"is_bot\":false,\"first_name\":\"Y\"},\"chat_instance\":\"i\",\"data\":\"d\"}}"
 
+const game_callback_body = "{\"update_id\":11,\"callback_query\":{\"id\":\"game\",\"from\":{\"id\":1,\"is_bot\":false,\"first_name\":\"Y\"},\"chat_instance\":\"i\",\"game_short_name\":\"chess\"}}"
+
 const edited_message_body = "{\"update_id\":4,\"edited_message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"hi\"}}"
 
 const message_with_url_body = "{\"update_id\":5,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"u\",\"entities\":[{\"type\":\"url\",\"offset\":0,\"length\":1}]}}"
+
+const message_with_date_time_body = "{\"update_id\":12,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":1,\"text\":\"tomorrow\",\"entities\":[{\"type\":\"date_time\",\"offset\":0,\"length\":8,\"unix_time\":1700000000,\"date_time_format\":\"relative\"}]}}"
 
 const edited_message_photo_caption_body = "{\"update_id\":6,\"edited_message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"photo\":[{\"file_id\":\"x\",\"file_unique_id\":\"u\",\"width\":1,\"height\":1}],\"caption\":\"c\"}}"
 
@@ -32,14 +24,18 @@ const message_left_chat_bot_body = "{\"update_id\":7,\"message\":{\"message_id\"
 
 const message_italic_url_body = "{\"update_id\":8,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\"x\",\"entities\":[{\"type\":\"italic\",\"offset\":0,\"length\":1},{\"type\":\"url\",\"offset\":0,\"length\":1}]}}"
 
+const chat_member_body = "{\"update_id\":9,\"chat_member\":{\"chat\":{\"id\":1,\"type\":\"group\",\"title\":\"G\"},\"from\":{\"id\":2,\"is_bot\":false,\"first_name\":\"Admin\"},\"date\":0,\"old_chat_member\":{\"status\":\"member\",\"user\":{\"id\":3,\"is_bot\":false,\"first_name\":\"User\"}},\"new_chat_member\":{\"status\":\"left\",\"user\":{\"id\":3,\"is_bot\":false,\"first_name\":\"User\"}}}}"
+
+const guest_message_body = "{\"update_id\":10,\"guest_message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"from\":{\"id\":4,\"is_bot\":false,\"is_premium\":true,\"first_name\":\"Guest\"},\"text\":\"hi\"}}"
+
 fn matches_str(query: String, body: String) -> Bool {
   let assert Ok(q) = filter.parse(query)
-  filter.matches_query(q, ctx(make(body)))
+  filter.matches_query(q, ctx_from(body))
 }
 
 fn matches_many(queries: List(String), body: String) -> Bool {
   let assert Ok(q) = filter.parse_many(queries)
-  filter.matches_query(q, ctx(make(body)))
+  filter.matches_query(q, ctx_from(body))
 }
 
 // =====================================================================
@@ -56,6 +52,22 @@ pub fn rejects_empty_filter_test() {
 pub fn rejects_invalid_default_omissions_test() {
   assert_error(filter.parse("message:"), "'message:'")
   assert_error(filter.parse("::me"), "'::me'")
+}
+
+pub fn rejects_unmodelled_message_fields_test() {
+  assert_error(
+    filter.parse("message:game"),
+    "a field that the typed Message cannot inspect",
+  )
+}
+
+pub fn rejects_me_filter_without_bot_identity_test() {
+  case filter.parse("message:new_chat_members:me") {
+    Error(filter.UnsupportedBotIdentityFilter(query)) -> {
+      assert query == "message:new_chat_members:me"
+    }
+    _ -> panic as "expected UnsupportedBotIdentityFilter"
+  }
 }
 
 fn assert_error(result: Result(a, b), what: String) -> Nil {
@@ -124,10 +136,27 @@ pub fn expands_l2_shortcuts_test() {
 pub fn performs_l3_filtering_test() {
   // entities:url
   assert matches_str("message:entities:url", message_with_url_body) == True
+  assert matches_str("message:entities:date_time", message_with_date_time_body)
+    == True
+  assert matches_str("::date_time", message_with_date_time_body) == True
 
   // left_chat_member with is_bot=true
   assert matches_str(":left_chat_member:is_bot", message_left_chat_bot_body)
     == True
+}
+
+pub fn chat_member_from_matches_required_sender_test() {
+  assert matches_str("chat_member:from", chat_member_body) == True
+  assert matches_str("chat_member:from:is_bot", chat_member_body) == False
+  assert matches_str("my_chat_member:from", chat_member_body) == False
+}
+
+pub fn guest_message_supports_message_fields_and_from_l3_test() {
+  assert matches_str("guest_message:text", guest_message_body) == True
+  assert matches_str("guest_message:from", guest_message_body) == True
+  assert matches_str("guest_message:from:is_premium", guest_message_body)
+    == True
+  assert matches_str("guest_message:from:is_bot", guest_message_body) == False
 }
 
 pub fn matches_multiple_filters_test() {
@@ -157,6 +186,10 @@ pub fn parses_simple_query_test() {
 pub fn parses_callback_query_data_test() {
   assert matches_str("callback_query:data", callback_body) == True
   assert matches_str("callback_query:data", message_text_body) == False
+  assert matches_str("callback_query:data", game_callback_body) == False
+  assert matches_str("callback_query:game_short_name", game_callback_body)
+    == True
+  assert matches_str("callback_query:game_short_name", callback_body) == False
 }
 
 pub fn parses_message_photo_query_test() {

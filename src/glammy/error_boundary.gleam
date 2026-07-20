@@ -15,16 +15,25 @@
 
 import glammy/composer.{type Composer, type Middleware}
 import glammy/context.{type Context}
-import gleam/dynamic.{type Dynamic}
 
+/// The BEAM exception class captured by a boundary.
+pub type BoundaryClass {
+  ErrorClass
+  ExitClass
+  ThrowClass
+  OtherClass(String)
+}
+
+/// A safely rendered BEAM failure captured by an error boundary.
 pub type BoundaryError {
-  /// Captured class (e.g. `error`, `throw`, `exit`), value, and the raw
-  /// stacktrace term. Best inspected via `string.inspect`.
-  Caught(class: Dynamic, value: Dynamic, stacktrace: Dynamic)
+  /// Captured exception class plus safe textual representations of the
+  /// reason and stacktrace. Foreign BEAM terms do not escape through the
+  /// public Gleam API as `Dynamic` values.
+  Caught(class: BoundaryClass, value: String, stacktrace: String)
 }
 
 @external(erlang, "glammy_ffi", "try_run")
-fn try_run(f: fn() -> Nil) -> Result(Nil, #(Dynamic, Dynamic, Dynamic))
+fn try_run(f: fn() -> Nil) -> Result(Nil, #(String, String, String))
 
 /// Wrap a sub-composer in an error boundary. Errors raised by any
 /// middleware in `inner` are passed to `on_error` rather than
@@ -38,8 +47,20 @@ pub fn boundary(
     case try_run(fn() { composer.run(inner, ctx) }) {
       Ok(_) -> Nil
       Error(#(class, value, stack)) ->
-        on_error(ctx, Caught(class:, value:, stacktrace: stack))
+        on_error(
+          ctx,
+          Caught(class: boundary_class(class), value:, stacktrace: stack),
+        )
     }
     next()
+  }
+}
+
+fn boundary_class(class: String) -> BoundaryClass {
+  case class {
+    "error" -> ErrorClass
+    "exit" -> ExitClass
+    "throw" -> ThrowClass
+    other -> OtherClass(other)
   }
 }
