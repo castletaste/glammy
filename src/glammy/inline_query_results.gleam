@@ -712,20 +712,11 @@ fn finish_result(
       reply_markup,
       keyboard.inline_to_json,
     )
-    |> opt_input_content(input)
+    |> json_utils.put_optional(
+      "input_message_content",
+      input,
+      input_message_content_to_json,
+    )
     |> json.object,
   )
-}
-
-fn opt_input_content(
-  fields: List(#(String, json.Json)),
-  input: Option(InputMessageContent),
-) -> List(#(String, json.Json)) {
-  case input {
-    None -> fields
-    Some(c) ->
-      list.append(fields, [
-        #("input_message_content", input_message_content_to_json(c)),
-      ])
-  }
 }

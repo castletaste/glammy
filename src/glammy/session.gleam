@@ -14,6 +14,7 @@
 import glammy/composer.{type Composer}
 import glammy/context.{type Context}
 import glammy/internal/clock
+import glammy/internal/ffi
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/int
@@ -750,53 +751,42 @@ fn storage_call_from_broker(
 }
 
 fn safely_run_backend(operation: fn() -> value) -> Result(value, StorageError) {
-  let reply: Subject(value) = process.new_subject()
-  case try_run(fn() { process.send(reply, operation()) }) {
-    Ok(Nil) ->
-      case process.receive(reply, 0) {
-        Ok(value) -> Ok(value)
-        Error(_) ->
-          Error(BackendFailed(
-            class: "error",
-            value: "backend returned without a value",
-            stacktrace: "[]",
-          ))
-      }
-    Error(#(class, value, stacktrace)) ->
-      Error(BackendFailed(class:, value:, stacktrace:))
+  case ffi.try_run(operation) {
+    Ok(value) -> Ok(value)
+    Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
+      Error(BackendFailed(
+        class: ffi.exception_class_name(class),
+        value:,
+        stacktrace:,
+      ))
   }
 }
 
 fn safely_run_handler(operation: fn() -> value) -> Result(value, StorageError) {
-  let reply: Subject(value) = process.new_subject()
-  case try_run(fn() { process.send(reply, operation()) }) {
-    Ok(Nil) ->
-      case process.receive(reply, 0) {
-        Ok(value) -> Ok(value)
-        Error(_) ->
-          Error(HandlerFailed(
-            class: "error",
-            value: "handler returned without a value",
-            stacktrace: "[]",
-          ))
-      }
-    Error(#(class, value, stacktrace)) ->
-      Error(HandlerFailed(class:, value:, stacktrace:))
+  case ffi.try_run(operation) {
+    Ok(value) -> Ok(value)
+    Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
+      Error(HandlerFailed(
+        class: ffi.exception_class_name(class),
+        value:,
+        stacktrace:,
+      ))
   }
 }
 
 fn safely_run_after_commit(
   operation: fn() -> Nil,
 ) -> Result(Nil, StorageError) {
-  case try_run(operation) {
+  case ffi.try_run(operation) {
     Ok(Nil) -> Ok(Nil)
-    Error(#(class, value, stacktrace)) ->
-      Error(AfterCommitFailed(class:, value:, stacktrace:))
+    Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
+      Error(AfterCommitFailed(
+        class: ffi.exception_class_name(class),
+        value:,
+        stacktrace:,
+      ))
   }
 }
-
-@external(erlang, "glammy_ffi", "try_run")
-fn try_run(operation: fn() -> Nil) -> Result(Nil, #(String, String, String))
 
 // =====================================================================
 //                          Key functions

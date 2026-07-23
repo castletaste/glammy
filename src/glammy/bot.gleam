@@ -9,6 +9,7 @@ import glammy/composer.{type Composer}
 import glammy/context
 import glammy/error.{type GlammyError}
 import glammy/internal/clock
+import glammy/internal/ffi
 import glammy/types.{type Update}
 import gleam/erlang/process
 import gleam/int
@@ -451,7 +452,7 @@ fn run_callback_guard(
 ) -> Nil {
   let outcome =
     run_owned_task(owner_pid, timeout_ms, callback_stop_timeout_ms, fn() {
-      case try_run(fn() { callback(value) }) {
+      case ffi.try_run(fn() { callback(value) }) {
         Ok(Nil) -> CallbackCompleted
         Error(_) -> CallbackCrashed
       }
@@ -620,27 +621,18 @@ fn run_handler_from_broker(
   update: Update,
   timeout_ms: Int,
 ) -> Option(Result(Nil, BotRuntimeError)) {
-  let reported = process.new_subject()
   let phase: process.Subject(DispatchPhase) = process.new_subject()
   let outcome =
     run_owned_task(owner_pid, timeout_ms, handler_stop_timeout_ms, fn() {
-      try_run(fn() {
-        process.send(
-          reported,
-          dispatch_update(bot, update, fn(current_phase) {
-            process.send(phase, current_phase)
-          }),
-        )
+      ffi.try_run(fn() {
+        dispatch_update(bot, update, fn(current_phase) {
+          process.send(phase, current_phase)
+        })
       })
     })
   case outcome {
     OwnedTaskCompleted(execution) ->
-      Some(handler_result_from_report(
-        execution,
-        reported,
-        phase,
-        update.update_id,
-      ))
+      Some(handler_result_from_execution(execution, phase, update.update_id))
     OwnedTaskCrashed(down) ->
       Some(Error(classify_handler_down(update.update_id, phase, down)))
     OwnedTaskTimedOut ->
@@ -656,28 +648,18 @@ fn run_handler_from_broker(
   }
 }
 
-fn handler_result_from_report(
-  execution: Result(Nil, #(String, String, String)),
-  reported: process.Subject(Result(Nil, BotRuntimeError)),
+fn handler_result_from_execution(
+  execution: Result(Result(Nil, BotRuntimeError), ffi.CaughtException),
   phase: process.Subject(DispatchPhase),
   update_id: Int,
 ) -> Result(Nil, BotRuntimeError) {
   case execution {
-    Ok(Nil) ->
-      case process.receive(reported, 0) {
-        Ok(result) -> result
-        Error(Nil) ->
-          Error(classify_dispatch_crash(
-            update_id,
-            phase,
-            "handler returned without reporting a result",
-          ))
-      }
-    Error(#(class, value, stacktrace)) ->
+    Ok(result) -> result
+    Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
       Error(classify_dispatch_crash(
         update_id,
         phase,
-        class <> ": " <> value <> " " <> stacktrace,
+        ffi.exception_class_name(class) <> ": " <> value <> " " <> stacktrace,
       ))
   }
 }
@@ -719,9 +701,6 @@ fn latest_dispatch_phase(
     Error(_) -> latest
   }
 }
-
-@external(erlang, "glammy_ffi", "try_run")
-fn try_run(operation: fn() -> Nil) -> Result(Nil, #(String, String, String))
 
 // Unlike a separate spawn followed by monitor, this cannot lose ordering when
 // a guard or broker reports and exits before its caller installs the monitor.

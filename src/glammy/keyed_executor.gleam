@@ -14,6 +14,7 @@
 import glammy/bot
 import glammy/context
 import glammy/internal/clock
+import glammy/internal/ffi
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/erlang/atom
@@ -1531,20 +1532,10 @@ fn run_task(
 }
 
 fn safely_run(operation: fn() -> result) -> JobOutcome(result) {
-  let value: Subject(result) = process.new_subject()
-  case try_run(fn() { process.send(value, operation()) }) {
-    Error(#(class, error_value, stacktrace)) ->
-      Crashed(class:, value: error_value, stacktrace:)
-    Ok(Nil) ->
-      case process.receive(value, 0) {
-        Ok(result) -> Completed(result)
-        Error(Nil) ->
-          Crashed(
-            class: "error",
-            value: "operation returned without reporting a value",
-            stacktrace: "[]",
-          )
-      }
+  case ffi.try_run(operation) {
+    Ok(result) -> Completed(result)
+    Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
+      Crashed(class: ffi.exception_class_name(class), value:, stacktrace:)
   }
 }
 
@@ -1724,6 +1715,3 @@ fn fifo_is_empty(queue: Fifo(value)) -> Bool {
 fn fifo_to_list(queue: Fifo(value)) -> List(value) {
   list.append(queue.front, list.reverse(queue.back))
 }
-
-@external(erlang, "glammy_ffi", "try_run")
-fn try_run(operation: fn() -> Nil) -> Result(Nil, #(String, String, String))

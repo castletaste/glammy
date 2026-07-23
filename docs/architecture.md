@@ -23,7 +23,8 @@ glammy (entry)
       ├─ glammy/conversations           — OTP registry + worker-per-flow
       ├─ glammy/keyed_executor          — bounded FIFO-per-key scheduler
       ├─ glammy/error_boundary          — catches Erlang try/catch
-      │   └─ glammy_ffi.erl             — small Erlang FFI for try_run/1
+      ├─ glammy/internal/ffi            — typed exception boundary
+      │   └─ glammy_ffi.erl             — Erlang try/catch for try_run/1
       ├─ glammy/keyboard                — Inline / Reply keyboard builders
       ├─ glammy/inline_query_results    — InlineQueryResult* builders
       ├─ glammy/input_media             — InputMedia* builders
@@ -304,7 +305,8 @@ application-owned persistence.
   sequential offset handling, owner-aware isolated handler workers, bounded
   diagnostic callbacks, runtime failure policy, `start`, `handle_update`, and
   `handle_update_isolated`.
-- **`glammy/webhook.gleam`** — `handle` / `handle_with_secret` /
+- **`glammy/webhook.gleam`** — synchronous `handle` / `handle_with_secret`,
+  isolated `handle_isolated` / `handle_isolated_with_secret`, and
   `verify_secret`. Framework-agnostic.
 - **`glammy/webhook_secret.gleam`** — shared opaque, validated
   `WebhookSecret` used by both `setWebhook` registration and request
@@ -349,11 +351,13 @@ application-owned persistence.
 - **`glammy/escape.gleam`** — HTML / Markdown / MarkdownV2 escapers.
 - **`glammy/internal/json_utils.gleam`** — INTERNAL. Shared
   `put_optional` / `opt_str` / `opt_int` / `opt_bool` / `opt_float` /
-  `opt_with_default` / `opt_nested` / `opt_list` for the JSON
-  build/decode boilerplate. `opt_nested` covers an optional nested
-  object field, `opt_list` an optional list field defaulting to `[]`.
+  `opt_nested` / `opt_list` for the JSON build/decode boilerplate.
+  `opt_nested` covers an optional nested object field, `opt_list` an
+  optional list field defaulting to `[]`.
 - **`glammy/internal/http_response.gleam`** — INTERNAL. Shared HTTP response
   status/content-type classification for JSON API and webhook boundaries.
+- **`glammy/internal/ffi.gleam`** — INTERNAL. Typed, polymorphic wrapper around
+  the package's Erlang exception boundary.
 - **`glammy_ffi.erl`** — audited `try_run/1` boundary used to classify panics
   in error boundaries, polling handlers, session transitions, and callbacks.
 

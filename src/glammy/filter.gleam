@@ -176,7 +176,8 @@ type CompiledTriple {
 /// is malformed (empty, has empty parts that can't be defaulted, refers
 /// to an unknown update key, …).
 pub fn parse(filter: String) -> Result(Query, ParseError) {
-  parse_many([filter])
+  parse_one(filter)
+  |> result.map(fn(alternatives) { Query(alternatives:) })
 }
 
 /// Parse multiple filter strings as a logical OR. The resulting query
@@ -228,7 +229,7 @@ fn parse_depth2(
   case l1, l2 {
     "", "" -> Error(EmptyFilter(query: original))
     _, "" -> Error(InvalidFilterLevel(query: original, level: 2, value: ""))
-    _, _ -> cross_validate(original, l1, expand_l2_without_l3(l2), None)
+    _, _ -> cross_validate(original, l1, expand_l2_aliases(l2), None)
   }
 }
 
@@ -255,23 +256,18 @@ fn cross_validate(
   l3: option.Option(String),
 ) -> Result(List(CompiledTriple), ParseError) {
   let l1_candidates = expand_l1(l1) |> list.filter(is_valid_l1)
-  let expanded =
-    list.flat_map(l1_candidates, fn(l1n) {
-      list.map(l2_candidates, fn(l2n) {
-        CompiledTriple(l1: l1n, l2: Some(l2n), l3: l3)
-      })
-    })
   let valid =
-    list.filter(expanded, fn(t) {
-      let l2_ok = case t.l2 {
-        Some(name) -> is_valid_l2(t.l1, name)
-        None -> True
-      }
-      let l3_ok = case t.l2, t.l3 {
-        Some(l2n), Some(l3n) -> is_valid_l3(l2n, l3n)
-        _, _ -> True
-      }
-      l2_ok && l3_ok
+    list.flat_map(l1_candidates, fn(l1n) {
+      list.filter_map(l2_candidates, fn(l2n) {
+        let l3_ok = case l3 {
+          Some(l3n) -> is_valid_l3(l2n, l3n)
+          None -> True
+        }
+        case is_valid_l2(l1n, l2n) && l3_ok {
+          True -> Ok(CompiledTriple(l1: l1n, l2: Some(l2n), l3: l3))
+          False -> Error(Nil)
+        }
+      })
     })
   case valid {
     [] -> Error(NoValidFilterExpansion(query: original))
@@ -308,15 +304,6 @@ fn expand_l2_aliases(l2: String) -> List(String) {
 fn expand_l2_with_l3(l2: String) -> List(String) {
   case l2 {
     "" -> ["entities", "caption_entities"]
-    _ -> expand_l2_aliases(l2)
-  }
-}
-
-fn expand_l2_without_l3(l2: String) -> List(String) {
-  case l2 {
-    // When there's no L3, the default L2 expansion does NOT apply (an
-    // empty L2 with no L3 is ambiguous and grammY rejects it).
-    "" -> []
     _ -> expand_l2_aliases(l2)
   }
 }

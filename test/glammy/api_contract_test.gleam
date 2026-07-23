@@ -272,13 +272,11 @@ pub fn timeout_and_poll_collection_invariants_test() {
 
   let assert Ok(option) = types.input_poll_option("one")
   assert types.input_poll_options([]) == Error(types.NoPollOptions)
-  let assert Ok(one_option) =
-    types.input_poll_options(repeat_poll_option(option, 1))
-  let assert Ok(five_options) =
-    types.input_poll_options(repeat_poll_option(option, 5))
+  let assert Ok(one_option) = types.input_poll_options(list.repeat(option, 1))
+  let assert Ok(five_options) = types.input_poll_options(list.repeat(option, 5))
   let assert Ok(twelve_options) =
-    types.input_poll_options(repeat_poll_option(option, 12))
-  assert types.input_poll_options(repeat_poll_option(option, 13))
+    types.input_poll_options(list.repeat(option, 12))
+  assert types.input_poll_options(list.repeat(option, 13))
     == Error(types.TooManyPollOptions(13))
 
   let _regular = api.regular_poll(one_option)
@@ -575,7 +573,7 @@ pub fn typed_actions_commands_permissions_and_reactions_test() {
     == Error(types.InvalidBotCommandCharacter)
   assert types.bot_command("", "missing", None)
     == Error(types.InvalidBotCommandLength(0))
-  assert types.bot_commands(repeat_bot_command(command, 101))
+  assert types.bot_commands(list.repeat(command, 101))
     == Error(types.TooManyBotCommands(101))
   let assert Ok(commands) = types.bot_commands([command])
   assert api.set_my_commands(client, commands, command_options) == Ok(True)
@@ -1087,24 +1085,4 @@ fn file_part_names(parts: List(Part)) -> List(String) {
       TextPart(..) -> Error(Nil)
     }
   })
-}
-
-fn repeat_poll_option(
-  option: types.InputPollOption,
-  count: Int,
-) -> List(types.InputPollOption) {
-  case count <= 0 {
-    True -> []
-    False -> [option, ..repeat_poll_option(option, count - 1)]
-  }
-}
-
-fn repeat_bot_command(
-  command: types.BotCommand,
-  count: Int,
-) -> List(types.BotCommand) {
-  case count <= 0 {
-    True -> []
-    False -> [command, ..repeat_bot_command(command, count - 1)]
-  }
 }

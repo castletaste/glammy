@@ -220,8 +220,9 @@ requires without directly comparing the secret values.
 
 ## D-12. `error_boundary` uses Erlang FFI for try/catch
 
-**Decision:** `glammy_ffi.erl::try_run/1` wraps a Gleam thunk in
-Erlang's `try Class:Reason:Stack`. Gleam itself has no try/catch.
+**Decision:** `glammy/internal/ffi.try_run` exposes a typed, polymorphic result
+over `glammy_ffi.erl::try_run/1`, which wraps a Gleam thunk in Erlang's
+`try Class:Reason:Stack`. Gleam itself has no try/catch.
 
 **Why:** Without FFI, we can't catch:
 - `panic as "..."`
@@ -235,7 +236,7 @@ per-update isolation worker. Webhooks have recommended isolated helpers with
 typed timeout/failure results; the synchronous helpers are an explicit opt-in
 for hosts that deliberately own the process boundary.
 
-**Surface area:** one Erlang function with one clause. Audited.
+**Surface area:** one internal Gleam module and one Erlang entry point. Audited.
 
 ## D-13. Conversations use chat:user keys and non-blocking workers
 
@@ -361,20 +362,10 @@ matches Gleam's "do something for the side effect" idiom.
 that wants to react to an API error pattern-matches on the `Result`
 itself. For panics, `error_boundary` catches them at a chosen point.
 
-## D-17. `pub const` over `pub fn` for placeholder values
+## D-17. JSON helpers live in `internal/json_utils`
 
-**Decision:** `placeholder_user: User = User(...)` is `pub const`, not
-a `pub fn placeholder_user() -> User`.
-
-**Why:** Constants are evaluated once at module load. Functions are
-called fresh every time. For values that exist purely as type-witnesses
-(never observably used), evaluating once is cheaper and clearer.
-
-## D-18. JSON helpers live in `internal/json_utils`
-
-**Decision:** `put_optional` / `put_optional_json` / `opt_str` /
-`opt_int` / `opt_bool` / `opt_float` / `opt_with_default` /
-`opt_nested` / `opt_list` are in
+**Decision:** `put_optional` / `opt_str` / `opt_int` / `opt_bool` /
+`opt_float` / `opt_nested` / `opt_list` are in
 `glammy/internal/json_utils.gleam`. Used by `api`, `types`,
 `keyboard`, `inline_query_results`, `input_media`.
 
@@ -383,7 +374,7 @@ DRY violation discovered during the idiomatic refactor). The
 `internal/` directory marks them as non-public-API — users importing
 glammy should never need them.
 
-## D-19. Bot API protocol handling is separate from HTTP dispatch
+## D-18. Bot API protocol handling is separate from HTTP dispatch
 
 **Decision:** `api.PreparedCall(value)` is opaque and carries a method,
 encoded payload description, and the decoder for that method's result. The
@@ -412,7 +403,7 @@ requires the token in the request URL, so `to_http_request` is the first point
 where it becomes visible. Returned requests must be redacted rather than
 printed or inspected in production logs.
 
-## D-20. Long polling isolates handlers but preserves batch order
+## D-19. Long polling isolates handlers but preserves batch order
 
 **Decision:** updates returned by one `getUpdates` call are handled
 sequentially. Each isolated dispatch uses a broker that monitors the direct
@@ -449,7 +440,7 @@ supervise it and enforce one poller per token. There is no first-class stop
 handle, readiness signal, double-start guard, supervisor child specification,
 descendant join barrier, or rollback of in-flight external effects.
 
-## D-21. High-level outbound APIs make invalid states unrepresentable
+## D-20. High-level outbound APIs make invalid states unrepresentable
 
 **Decision:** High-level send methods use finite sum types, endpoint-specific
 records, and opaque validated collections. Parse modes, chat actions, poll
@@ -485,7 +476,7 @@ explicit: high-level webhook registration models the public HTTPS-only
 endpoint, while local deployments can prepare that transport-specific call
 themselves.
 
-## D-22. Slow work uses a bounded keyed executor
+## D-21. Slow work uses a bounded keyed executor
 
 **Decision:** `keyed_executor` admits at most a configured active-plus-queued
 capacity, runs no more than the global concurrency limit, and executes jobs for

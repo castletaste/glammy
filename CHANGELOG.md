@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Simplified internal filtering, keyboard, multipart, JSON, and exception
+  handling by using existing Gleam standard-library operations and one typed
+  Erlang FFI boundary; the exported package interface is unchanged.
+- Conversation middleware now fails closed for every registry error while a
+  confirmed missing owner continues downstream as before.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added

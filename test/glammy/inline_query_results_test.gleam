@@ -10,6 +10,7 @@ import glammy/keyboard
 import glammy/parse_mode
 import glammy/types
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
@@ -556,11 +557,11 @@ pub fn result_collection_accepts_at_most_fifty_items_test() {
       thumbnail_url: None,
       reply_markup: None,
     )
-  case iqr.results(repeat(result, 50)) {
+  case iqr.results(list.repeat(result, 50)) {
     Ok(_) -> Nil
     _ -> panic as "expected 50 inline results to be valid"
   }
-  assert iqr.results(repeat(result, 51))
+  assert iqr.results(list.repeat(result, 51))
     == Error(iqr.TooManyInlineQueryResults(51))
 }
 
@@ -570,11 +571,4 @@ pub fn result_collection_accepts_at_most_fifty_items_test() {
 
 fn contains(haystack: String, needle: String) -> Bool {
   string.contains(haystack, needle)
-}
-
-fn repeat(value: value, count: Int) -> List(value) {
-  case count <= 0 {
-    True -> []
-    False -> [value, ..repeat(value, count - 1)]
-  }
 }

@@ -650,10 +650,9 @@ pub fn stop_conversation(
 
 /// Route replies to active conversations.
 ///
-/// Errors that prove no owner exists continue downstream. Registry timeouts,
-/// outcome-unknown routes, and buffer-full routes fail closed so an active or
-/// temporarily unobservable conversation never leaks its key's updates into
-/// ordinary middleware.
+/// A confirmed `Ok(False)` route continues downstream. Every registry error
+/// fails closed so an active or temporarily unobservable conversation never
+/// leaks its key's updates into ordinary middleware.
 ///
 /// This generic middleware cannot make polling retain an uncertain update;
 /// long-polling bots should use `update_gate` at `bot.with_update_gate`.
@@ -675,14 +674,7 @@ pub fn middleware_with_error(
         case registry_route_call(registry, ctx.update, key) {
           Ok(True) -> Nil
           Ok(False) -> next()
-          Error(CallTimeout) -> on_error(CallTimeout)
-          Error(Stopped) -> on_error(Stopped)
-          Error(RouteOutcomeUnknown) -> on_error(RouteOutcomeUnknown)
-          Error(RouteBufferFull) -> on_error(RouteBufferFull)
-          Error(error) -> {
-            on_error(error)
-            next()
-          }
+          Error(error) -> on_error(error)
         }
     }
   }
@@ -764,19 +756,11 @@ type RouteReply {
   RouteBackpressured
 }
 
-type PendingRoute {
-  PendingRoute(reply_to: Subject(RouteReply))
-}
-
-type BufferedRoute {
-  BufferedRoute(update: Update, reply_to: Subject(RouteReply))
-}
-
 type OwnerPhase {
   Waiting
-  Delivering(PendingRoute)
+  Delivering(reply_to: Subject(RouteReply))
   BetweenWaits
-  Buffered(BufferedRoute)
+  Buffered(update: Update, reply_to: Subject(RouteReply))
 }
 
 type Owner {
@@ -940,7 +924,7 @@ fn handle_registry_message(
                         ),
                       )
                     }
-                    Buffered(BufferedRoute(update:, reply_to: route_reply)) -> {
+                    Buffered(update:, reply_to: route_reply) -> {
                       let generation = owner.generation + 1
                       // Registration atomically claims the bounded buffer for
                       // this generation. Route ACK remains deferred until this
@@ -960,7 +944,7 @@ fn handle_registry_message(
                             Owner(
                               ..owner,
                               generation:,
-                              phase: Delivering(PendingRoute(route_reply)),
+                              phase: Delivering(reply_to: route_reply),
                             ),
                           ),
                         ),
@@ -1007,7 +991,7 @@ fn handle_registry_message(
                       process.send(reply_to, Ok(DeliveryAlreadyClaimed))
                       actor.continue(state)
                     }
-                    BetweenWaits | Buffered(_) -> {
+                    BetweenWaits | Buffered(_, _) -> {
                       process.send(progress, WaitPauseOwnerGone)
                       process.send(reply_to, Ok(WaitRegistrationGone))
                       actor.continue(state)
@@ -1058,7 +1042,7 @@ fn handle_registry_message(
                 && owner.pid == worker_pid,
                 owner.phase
               {
-                True, Delivering(PendingRoute(route_reply)) -> {
+                True, Delivering(reply_to: route_reply) -> {
                   // This is the exact process-local success boundary: the
                   // matching wait has dequeued Deliver and this serial actor
                   // has accepted its receipt. It does not prove that the user
@@ -1129,10 +1113,7 @@ fn handle_registry_message(
                           owners: dict.insert(
                             state.owners,
                             key,
-                            Owner(
-                              ..owner,
-                              phase: Delivering(PendingRoute(reply_to)),
-                            ),
+                            Owner(..owner, phase: Delivering(reply_to:)),
                           ),
                         ),
                       )
@@ -1148,10 +1129,7 @@ fn handle_registry_message(
                           owners: dict.insert(
                             state.owners,
                             key,
-                            Owner(
-                              ..owner,
-                              phase: Buffered(BufferedRoute(update:, reply_to:)),
-                            ),
+                            Owner(..owner, phase: Buffered(update:, reply_to:)),
                           ),
                         ),
                       )
@@ -1168,7 +1146,7 @@ fn handle_registry_message(
                   }
                 // Ownership is continuous but bounded to one queued update.
                 // Signal explicit backpressure without claiming this route.
-                Buffered(_) ->
+                Buffered(_, _) ->
                   case begin_route(deadline_ms, began, reply_to) {
                     False -> actor.continue(state)
                     True -> {
@@ -1282,11 +1260,11 @@ fn settle_owner_route(owner: Owner, replacement: Bool) -> Nil {
     // Deliver has already been sent. Without a receipt the registry cannot
     // distinguish an untouched mailbox from a dequeue followed by a crash, so
     // returning False would permit double processing downstream.
-    Delivering(PendingRoute(reply_to)) -> process.send(reply_to, RouteAmbiguous)
+    Delivering(reply_to:) -> process.send(reply_to, RouteAmbiguous)
     // A buffered update has not reached the worker. Normal completion or death
     // can safely release it downstream. Replacement fails closed because a new
     // owner for the same key is already being installed in this actor turn.
-    Buffered(BufferedRoute(reply_to:, ..)) ->
+    Buffered(reply_to:, ..) ->
       case replacement {
         True -> process.send(reply_to, RouteAmbiguous)
         False -> process.send(reply_to, RouteRejected)
