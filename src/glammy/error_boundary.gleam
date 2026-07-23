@@ -22,12 +22,6 @@ pub type BoundaryClass {
   ErrorClass
   ExitClass
   ThrowClass
-  /// Deprecated compatibility variant. No runtime boundary produces it.
-  ///
-  /// Replace an explicit match arm with a wildcard fallback in 0.1.x; remove
-  /// that fallback when upgrading to 0.2.0.
-  @deprecated("Replace OtherClass(_) with a wildcard fallback in 0.1.x; remove that fallback when upgrading to 0.2.0")
-  OtherClass(String)
 }
 
 /// A safely rendered BEAM failure captured by an error boundary.

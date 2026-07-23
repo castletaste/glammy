@@ -5,14 +5,16 @@ known correctness or liveness blocker remains.
 
 ## Public API compatibility
 
-Within 0.1.x, keep every published compatibility symbol available. Redundant
-surface must carry `@deprecated` with a concrete migration path; do not remove
-it merely because the package has a better typed replacement.
+When a previous Hex release exists, deprecate public surface with a concrete
+migration path for at least one published release before removing it. A
+pre-1.0 breaking removal increments the minor version; after 1.0 it increments
+the major version.
 
-Remove deprecated 0.1.x surface only in a dedicated 0.2.0 release PR. That PR
-must list every removal and replacement, include the complete package-interface
-diff, and treat downstream `--warnings-as-errors` users as requiring migration
-before the version bump.
+Every removal release must list each symbol and replacement, include the
+complete package-interface diff, and account for downstream
+`--warnings-as-errors` users. For a first Hex publication, describe changes
+from source candidates as historical context rather than claiming a published
+deprecation window.
 
 ## Prepare
 
@@ -42,13 +44,27 @@ before the version bump.
 6. Run an intentional `gleam update`, review every `manifest.toml` change and
    upstream release note, then rerun the full matrix. Do not refresh the lock
    file as an unreviewed side effect of publishing.
-7. Select one full 40-character release commit already at `origin/main`. Review
-   the complete range from the previous annotated release tag, not only the last
-   commit, and require a fully clean non-ignored worktree:
+7. Select one full 40-character release commit already at `origin/main`. For a
+   later release, review the complete range from the previous annotated release
+   tag, not only the last commit:
 
    ```sh
    git log --oneline --decorate PREVIOUS_TAG..RELEASE_SHA
    git diff --stat PREVIOUS_TAG..RELEASE_SHA
+   ```
+
+   For the first release, where no previous tag exists, review the complete
+   history and compare the release tree with Git's empty tree:
+
+   ```sh
+   git log --oneline --decorate RELEASE_SHA
+   git diff --stat "$(git hash-object -t tree /dev/null)" RELEASE_SHA
+   ```
+
+   In either case, require a fully clean non-ignored worktree at that exact
+   remote commit:
+
+   ```sh
    test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
    test "$(git rev-parse origin/main)" = "$RELEASE_SHA"
    test -z "$(git status --porcelain=v1 --untracked-files=all)"

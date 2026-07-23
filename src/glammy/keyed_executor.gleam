@@ -423,21 +423,6 @@ fn await_admission(
   }
 }
 
-/// Context-friendly admission using a key and operation derived from a value.
-///
-/// For a bot handler, `value` can be `glammy/context.Context`, `key_fn` can
-/// select a chat or user id, and `operation` can perform the slow LLM call.
-@deprecated("Derive the key explicitly and call keyed_executor.submit, or use keyed_executor.update_gate")
-pub fn submit_with_key(
-  executor: Executor(key, result),
-  value: value,
-  key_fn: fn(value) -> key,
-  operation: fn(value) -> result,
-  outcome: Subject(JobOutcome(result)),
-) -> Result(Nil, AdmissionError) {
-  submit(executor, key_fn(value), fn() { operation(value) }, outcome)
-}
-
 /// Derive the canonical per-chat executor key from a bot context.
 ///
 /// Updates without a Telegram chat id return `None` and therefore pass through

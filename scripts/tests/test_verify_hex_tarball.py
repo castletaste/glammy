@@ -16,6 +16,11 @@ from typing import Callable, Optional
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PROJECT_VERSION = next(
+    line.split('"', 2)[1].encode("ascii")
+    for line in (ROOT / "gleam.toml").read_text().splitlines()
+    if line.startswith("version = ")
+)
 VERIFIER = ROOT / "scripts" / "verify_hex_tarball.sh"
 COMPARER = ROOT / "scripts" / "compare_hex_artifacts.sh"
 ARCHIVE_ENV = "GLAMMY_HEX_ARCHIVE"
@@ -185,9 +190,12 @@ class HexTarballVerifierTest(unittest.TestCase):
         )
 
     def test_rejects_metadata_name_version_and_requirement_drift(self) -> None:
+        expected_version = (
+            b'{<<"version">>, <<"' + PROJECT_VERSION + b'"/utf8>>}.'
+        )
         replacements = (
             (b'{<<"name">>, <<"glammy"/utf8>>}.', b'{<<"name">>, <<"other"/utf8>>}.'),
-            (b'{<<"version">>, <<"0.1.0"/utf8>>}.', b'{<<"version">>, <<"9.9.9"/utf8>>}.'),
+            (expected_version, b'{<<"version">>, <<"9.9.9"/utf8>>}.'),
             (b">= 1.0.3 and < 2.0.0", b">= 1.1.0 and < 2.0.0"),
         )
         for original, replacement in replacements:

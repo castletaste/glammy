@@ -1217,54 +1217,6 @@ type CommonMediaOptions {
   )
 }
 
-/// Empty endpoint-specific options for `send_photo`.
-@deprecated("Use glammy/media_options.default_send_photo_options")
-pub fn default_send_photo_options() -> SendPhotoOptions {
-  media_options.default_send_photo_options()
-}
-
-/// Empty endpoint-specific options for `send_document`.
-@deprecated("Use glammy/media_options.default_send_document_options")
-pub fn default_send_document_options() -> SendDocumentOptions {
-  media_options.default_send_document_options()
-}
-
-/// Empty endpoint-specific options for `send_video`.
-@deprecated("Use glammy/media_options.default_send_video_options")
-pub fn default_send_video_options() -> SendVideoOptions {
-  media_options.default_send_video_options()
-}
-
-/// Empty endpoint-specific options for `send_audio`.
-@deprecated("Use glammy/media_options.default_send_audio_options")
-pub fn default_send_audio_options() -> SendAudioOptions {
-  media_options.default_send_audio_options()
-}
-
-/// Empty endpoint-specific options for `send_voice`.
-@deprecated("Use glammy/media_options.default_send_voice_options")
-pub fn default_send_voice_options() -> SendVoiceOptions {
-  media_options.default_send_voice_options()
-}
-
-/// Empty endpoint-specific options for `send_animation`.
-@deprecated("Use glammy/media_options.default_send_animation_options")
-pub fn default_send_animation_options() -> SendAnimationOptions {
-  media_options.default_send_animation_options()
-}
-
-/// Empty endpoint-specific options for `send_video_note`.
-@deprecated("Use glammy/media_options.default_send_video_note_options")
-pub fn default_send_video_note_options() -> SendVideoNoteOptions {
-  media_options.default_send_video_note_options()
-}
-
-/// Empty endpoint-specific options for `send_sticker`.
-@deprecated("Use glammy/media_options.default_send_sticker_options")
-pub fn default_send_sticker_options() -> SendStickerOptions {
-  media_options.default_send_sticker_options()
-}
-
 fn send_media_via_multipart(
   api: Api,
   method: String,
