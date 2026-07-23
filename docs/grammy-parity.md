@@ -30,7 +30,7 @@ or a substitute for executable coverage.
 | `convenience/input_media.ts`          | `glammy/input_media.gleam`                | Photo/Video/Audio/Doc/Animation    |
 | `convenience/session.ts`              | `glammy/session.gleam`                    | Pure-function `with_session`       |
 | `convenience/webhook.ts`              | `glammy/webhook.gleam`                    | Framework-agnostic                 |
-| `convenience/constants.ts`            | `glammy/constants.gleam`                  | Only values lacking typed APIs     |
+| `convenience/constants.ts`            | `glammy/constants.gleam`                  | Raw values + deprecated 0.1.x aliases |
 | `convenience/frameworks.ts`           | (not ported)                              | Framework adapters — N/A           |
 
 ### glammy additions (no grammY equivalent)

@@ -28,7 +28,7 @@ glammy (entry)
       ├─ glammy/keyboard                — Inline / Reply keyboard builders
       ├─ glammy/inline_query_results    — InlineQueryResult* builders
       ├─ glammy/input_media             — InputMedia* builders
-      ├─ glammy/constants               — remaining raw sticker/currency values
+      ├─ glammy/constants               — raw values + deprecated 0.1.x aliases
       └─ glammy/escape                  — HTML / Markdown escaping
 ```
 
@@ -347,7 +347,8 @@ application-owned persistence.
 - **`glammy/media_options.gleam` / `message_options.gleam`** — endpoint-specific
   media delivery records plus invariant-safe reply parameters.
 - **`glammy/constants.gleam`** — raw sticker-type and currency values without
-  equivalent typed outbound representations.
+  equivalent typed outbound representations, plus deprecated 0.1.x aliases
+  for callers migrating to finite typed values.
 - **`glammy/escape.gleam`** — HTML / Markdown / MarkdownV2 escapers.
 - **`glammy/internal/json_utils.gleam`** — INTERNAL. Shared
   `put_optional` / `opt_str` / `opt_int` / `opt_bool` / `opt_float` /
@@ -364,8 +365,8 @@ application-owned persistence.
 
 - **Naming:** snake_case for fns / types. Variants use PascalCase.
 - **Labelled args** are preferred for ambiguous same-typed public parameters
-  (for example `api.get_updates`). Remaining legacy wrappers are tracked for
-  API cleanup.
+  (for example `api.get_updates`). Legacy compatibility symbols carry explicit
+  `@deprecated` replacements throughout 0.1.x and are removed only in 0.2.0.
 - **Opaque types** for everything stateful (`Api`, `Composer`, `Bot`,
   `Storage`, `Registry`). Construction via `new`/`memory_storage`/etc.
 - **Result returns** for fallible operations. No exceptions in the

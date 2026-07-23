@@ -3,6 +3,17 @@
 Hex releases are immutable public API commitments. Do not publish while a
 known correctness or liveness blocker remains.
 
+## Public API compatibility
+
+Within 0.1.x, keep every published compatibility symbol available. Redundant
+surface must carry `@deprecated` with a concrete migration path; do not remove
+it merely because the package has a better typed replacement.
+
+Remove deprecated 0.1.x surface only in a dedicated 0.2.0 release PR. That PR
+must list every removal and replacement, include the complete package-interface
+diff, and treat downstream `--warnings-as-errors` users as requiring migration
+before the version bump.
+
 ## Prepare
 
 1. Audit against the latest Telegram Bot API release. Record the supported
