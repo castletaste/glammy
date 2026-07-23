@@ -305,7 +305,8 @@ application-owned persistence.
   sequential offset handling, owner-aware isolated handler workers, bounded
   diagnostic callbacks, runtime failure policy, `start`, `handle_update`, and
   `handle_update_isolated`.
-- **`glammy/webhook.gleam`** — `handle` / `handle_with_secret` /
+- **`glammy/webhook.gleam`** — synchronous `handle` / `handle_with_secret`,
+  isolated `handle_isolated` / `handle_isolated_with_secret`, and
   `verify_secret`. Framework-agnostic.
 - **`glammy/webhook_secret.gleam`** — shared opaque, validated
   `WebhookSecret` used by both `setWebhook` registration and request

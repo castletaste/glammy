@@ -275,7 +275,7 @@ pub fn inline_rows(
 /// Transpose the keyboard — flip rows and columns. Idempotent under
 /// double application iff the shape is rectangular.
 pub fn inline_transpose(keyboard: InlineKeyboard) -> InlineKeyboard {
-  inline_from(transpose(inline_rows(keyboard)))
+  inline_from(list.transpose(inline_rows(keyboard)))
 }
 
 /// Wrap all buttons into rows of at most `cols` columns. If
@@ -389,8 +389,8 @@ fn inline_button_fields(button: InlineKeyboardButton) -> ButtonFields {
       ) = inline_button_fields(button)
       ButtonFields(
         fields:,
-        style: prefer(style, inner_style),
-        icon_custom_emoji_id: prefer(icon_custom_emoji_id, inner_icon),
+        style: option.or(style, inner_style),
+        icon_custom_emoji_id: option.or(icon_custom_emoji_id, inner_icon),
       )
     }
   }
@@ -398,13 +398,6 @@ fn inline_button_fields(button: InlineKeyboardButton) -> ButtonFields {
 
 fn plain_button_fields(fields: List(#(String, json.Json))) -> ButtonFields {
   ButtonFields(fields:, style: None, icon_custom_emoji_id: None)
-}
-
-fn prefer(value: Option(a), fallback: Option(a)) -> Option(a) {
-  case value {
-    Some(_) -> value
-    None -> fallback
-  }
 }
 
 fn button_style_to_json(style: ButtonStyle) -> json.Json {
@@ -855,7 +848,7 @@ pub fn reply_rows(keyboard: ReplyKeyboard) -> List(List(ReplyKeyboardButton)) {
 
 /// Transpose the reply keyboard rows.
 pub fn reply_transpose(keyboard: ReplyKeyboard) -> ReplyKeyboard {
-  let rows = transpose(reply_rows(keyboard))
+  let rows = list.transpose(reply_rows(keyboard))
   ReplyKeyboard(..keyboard, reversed_rows: list.reverse(rows))
 }
 
@@ -998,8 +991,8 @@ fn reply_button_fields(button: ReplyKeyboardButton) -> ButtonFields {
       ) = reply_button_fields(button)
       ButtonFields(
         fields:,
-        style: prefer(style, inner_style),
-        icon_custom_emoji_id: prefer(icon_custom_emoji_id, inner_icon),
+        style: option.or(style, inner_style),
+        icon_custom_emoji_id: option.or(icon_custom_emoji_id, inner_icon),
       )
     }
   }
@@ -1087,37 +1080,6 @@ fn materialise_rows(reversed_rows: List(List(a))) -> List(List(a)) {
   |> list.filter(fn(row) { row != [] })
 }
 
-fn transpose(matrix: List(List(a))) -> List(List(a)) {
-  case matrix {
-    [] -> []
-    [[], ..] -> []
-    _ -> {
-      let heads =
-        list.filter_map(matrix, fn(row) {
-          case row {
-            [h, ..] -> Ok(h)
-            [] -> Error(Nil)
-          }
-        })
-      let tails =
-        list.filter_map(matrix, fn(row) {
-          case row {
-            [_, ..rest] ->
-              case rest {
-                [] -> Error(Nil)
-                _ -> Ok(rest)
-              }
-            [] -> Error(Nil)
-          }
-        })
-      case heads {
-        [] -> []
-        _ -> [heads, ..transpose(tails)]
-      }
-    }
-  }
-}
-
 fn chunk_for_flow(
   items: List(a),
   cols: Int,
@@ -1139,7 +1101,7 @@ fn chunk_top(items: List(a), cols: Int) -> List(List(a)) {
   case items {
     [] -> []
     _ -> {
-      let #(head, rest) = take_n(items, cols)
+      let #(head, rest) = list.split(items, cols)
       [head, ..chunk_top(rest, cols)]
     }
   }
@@ -1154,19 +1116,8 @@ fn chunk_bottom(items: List(a), cols: Int) -> List(List(a)) {
   case n {
     0 -> []
     _ -> {
-      let #(head, rest) = take_n(items, remainder)
+      let #(head, rest) = list.split(items, remainder)
       [head, ..chunk_top(rest, cols)]
-    }
-  }
-}
-
-fn take_n(items: List(a), n: Int) -> #(List(a), List(a)) {
-  case n <= 0, items {
-    True, _ -> #([], items)
-    _, [] -> #([], [])
-    _, [head, ..rest] -> {
-      let #(taken, remainder) = take_n(rest, n - 1)
-      #([head, ..taken], remainder)
     }
   }
 }

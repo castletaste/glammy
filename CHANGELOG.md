@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replaced private list, option, and hexadecimal helpers with equivalent
+  standard-library operations and direct function composition.
+- Conversation middleware now treats every registry error as fail-closed,
+  keeping future error variants from leaking updates into ordinary middleware.
 - Removed redundant raw compatibility aliases where finite Gleam types already
   provide the canonical outbound representation (`parse_mode`, `chat_action`,
   typed poll/dice values, and `BotCommandScope`). Media-option defaults now live

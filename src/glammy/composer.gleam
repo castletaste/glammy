@@ -171,16 +171,7 @@ pub fn command(
   name: String,
   handler: fn(Context) -> Nil,
 ) -> Composer {
-  when(
-    composer,
-    fn(ctx) {
-      case extract_command(ctx) {
-        Some(ParsedCommand(command_name, None)) if command_name == name -> True
-        _ -> False
-      }
-    },
-    handler,
-  )
+  command_any(composer, [name], handler)
 }
 
 /// Append a handler for `/<command>` and

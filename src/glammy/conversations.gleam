@@ -650,10 +650,9 @@ pub fn stop_conversation(
 
 /// Route replies to active conversations.
 ///
-/// Errors that prove no owner exists continue downstream. Registry timeouts,
-/// outcome-unknown routes, and buffer-full routes fail closed so an active or
-/// temporarily unobservable conversation never leaks its key's updates into
-/// ordinary middleware.
+/// A confirmed `Ok(False)` route continues downstream. Every registry error
+/// fails closed so an active or temporarily unobservable conversation never
+/// leaks its key's updates into ordinary middleware.
 ///
 /// This generic middleware cannot make polling retain an uncertain update;
 /// long-polling bots should use `update_gate` at `bot.with_update_gate`.
@@ -675,14 +674,7 @@ pub fn middleware_with_error(
         case registry_route_call(registry, ctx.update, key) {
           Ok(True) -> Nil
           Ok(False) -> next()
-          Error(CallTimeout) -> on_error(CallTimeout)
-          Error(Stopped) -> on_error(Stopped)
-          Error(RouteOutcomeUnknown) -> on_error(RouteOutcomeUnknown)
-          Error(RouteBufferFull) -> on_error(RouteBufferFull)
-          Error(error) -> {
-            on_error(error)
-            next()
-          }
+          Error(error) -> on_error(error)
         }
     }
   }

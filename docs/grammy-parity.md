@@ -42,6 +42,7 @@ or a substitute for executable coverage.
 | `glammy/keyed_executor.gleam`   | Bounded FIFO-per-key concurrency and backpressure       |
 | `glammy/escape.gleam`           | HTML / Markdown / MarkdownV2 escapers                   |
 | `glammy/input_file.gleam`       | Sum-type file descriptors (no auto-I/O)                 |
+| `glammy/internal/ffi.gleam`     | Typed Erlang exception boundary (internal)              |
 | `glammy/internal/json_utils.gleam` | Shared encoder/decoder helpers (internal)            |
 
 ## Test mapping

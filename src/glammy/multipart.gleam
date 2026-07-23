@@ -8,7 +8,6 @@
 //// boundary=…` header.
 
 import gleam/bit_array
-import gleam/int
 import gleam/list
 import gleam/option.{type Option}
 import gleam/string
@@ -120,46 +119,12 @@ fn safe_content_type(content_type: Option(String)) -> String {
 /// but using a strong source is simpler than reasoning about
 /// uniqueness elsewhere.
 fn random_boundary() -> String {
-  "glammy-" <> hex_encode(strong_rand_bytes(16))
+  let random =
+    strong_rand_bytes(16)
+    |> bit_array.base16_encode
+    |> string.lowercase
+  "glammy-" <> random
 }
 
 @external(erlang, "crypto", "strong_rand_bytes")
 fn strong_rand_bytes(n: Int) -> BitArray
-
-fn hex_encode(bits: BitArray) -> String {
-  do_hex_encode(bits, "")
-}
-
-fn do_hex_encode(bits: BitArray, acc: String) -> String {
-  case bits {
-    <<>> -> acc
-    <<byte:int-size(8), rest:bits>> -> {
-      let high = int.bitwise_shift_right(byte, 4)
-      let low = int.bitwise_and(byte, 15)
-      do_hex_encode(rest, acc <> hex_digit(high) <> hex_digit(low))
-    }
-    _ -> acc
-  }
-}
-
-fn hex_digit(n: Int) -> String {
-  case n {
-    0 -> "0"
-    1 -> "1"
-    2 -> "2"
-    3 -> "3"
-    4 -> "4"
-    5 -> "5"
-    6 -> "6"
-    7 -> "7"
-    8 -> "8"
-    9 -> "9"
-    10 -> "a"
-    11 -> "b"
-    12 -> "c"
-    13 -> "d"
-    14 -> "e"
-    15 -> "f"
-    _ -> "0"
-  }
-}

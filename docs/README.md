@@ -54,5 +54,5 @@ organisation (`gleam_stdlib`, `gleam_erlang`, `gleam_json`, `gleam_http`,
 - Helpers: `glammy/constants`, `glammy/escape`,
   `glammy/inline_query_results`
 
-**Internal:** `glammy/internal/json_utils` and
-`glammy/internal/http_response` are implementation helpers, not public API.
+**Internal:** `glammy/internal/json_utils`, `glammy/internal/http_response`,
+and `glammy/internal/ffi` are implementation helpers, not public API.
