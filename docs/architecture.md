@@ -23,11 +23,12 @@ glammy (entry)
       ├─ glammy/conversations           — OTP registry + worker-per-flow
       ├─ glammy/keyed_executor          — bounded FIFO-per-key scheduler
       ├─ glammy/error_boundary          — catches Erlang try/catch
-      │   └─ glammy_ffi.erl             — small Erlang FFI for try_run/1
+      │   └─ glammy/internal/ffi        — typed exception classes/results
+      │       └─ glammy_ffi.erl         — small Erlang try/catch boundary
       ├─ glammy/keyboard                — Inline / Reply keyboard builders
       ├─ glammy/inline_query_results    — InlineQueryResult* builders
       ├─ glammy/input_media             — InputMedia* builders
-      ├─ glammy/constants               — parse modes, chat actions, etc.
+      ├─ glammy/constants               — remaining raw sticker/currency values
       └─ glammy/escape                  — HTML / Markdown escaping
 ```
 
@@ -322,7 +323,7 @@ application-owned persistence.
   FIFO execution per key, a global concurrency ceiling, typed admission
   ambiguity/backpressure, monitored job outcomes, and bounded shutdown.
 - **`glammy/error_boundary.gleam`** — wraps a sub-composer in Erlang
-  `try` (via `glammy_ffi.erl`) so panics don't propagate out.
+  `try` (via the typed internal FFI wrapper) so panics don't propagate out.
 - **`glammy/multipart.gleam`** — hand-rolled multipart/form-data encoder
   (`Part`, `Encoded`, `encode/1`) using `crypto:strong_rand_bytes` for
   the boundary.
@@ -344,18 +345,19 @@ application-owned persistence.
   `types`.
 - **`glammy/media_options.gleam` / `message_options.gleam`** — endpoint-specific
   media delivery records plus invariant-safe reply parameters.
-- **`glammy/constants.gleam`** — compatibility constants and remaining stable
-  Telegram values (sticker types, currencies, scope names).
+- **`glammy/constants.gleam`** — raw sticker-type and currency values without
+  equivalent typed outbound representations.
 - **`glammy/escape.gleam`** — HTML / Markdown / MarkdownV2 escapers.
 - **`glammy/internal/json_utils.gleam`** — INTERNAL. Shared
   `put_optional` / `opt_str` / `opt_int` / `opt_bool` / `opt_float` /
-  `opt_with_default` / `opt_nested` / `opt_list` for the JSON
-  build/decode boilerplate. `opt_nested` covers an optional nested
-  object field, `opt_list` an optional list field defaulting to `[]`.
+  `opt_nested` / `opt_list` for the JSON build/decode boilerplate.
+  `opt_nested` covers an optional nested object field, `opt_list` an
+  optional list field defaulting to `[]`.
 - **`glammy/internal/http_response.gleam`** — INTERNAL. Shared HTTP response
   status/content-type classification for JSON API and webhook boundaries.
-- **`glammy_ffi.erl`** — audited `try_run/1` boundary used to classify panics
-  in error boundaries, polling handlers, session transitions, and callbacks.
+- **`glammy/internal/ffi.gleam` / `glammy_ffi.erl`** — audited typed
+  `try_run` boundary used to classify panics in error boundaries, polling
+  handlers, and session transitions, plus a no-payload callback path.
 
 ## Conventions
 
@@ -368,7 +370,7 @@ application-owned persistence.
 - **Result returns** for fallible operations. No exceptions in the
   public API surface.
 - **`Option(T)`** for nullable Telegram fields.
-- **`@external`** only when truly necessary (`glammy_ffi:try_run`,
+- **`@external`** only when truly necessary (`glammy/internal/ffi`,
   `crypto:hash` / `hash_equals` / `strong_rand_bytes`, and
   `erlang:monotonic_time`).
 - **`use` syntax** for decoders and shared helpers

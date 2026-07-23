@@ -24,18 +24,6 @@ pub fn put_optional(
   }
 }
 
-/// Like `put_optional` but the value is already a `json.Json`.
-pub fn put_optional_json(
-  fields: List(#(String, json.Json)),
-  key: String,
-  value: Option(json.Json),
-) -> List(#(String, json.Json)) {
-  case value {
-    None -> fields
-    Some(v) -> list.append(fields, [#(key, v)])
-  }
-}
-
 // =====================================================================
 //                       Decoder helpers (use-friendly)
 // =====================================================================
@@ -66,18 +54,6 @@ pub fn opt_float(
   next: fn(Option(Float)) -> Decoder(t),
 ) -> Decoder(t) {
   decode.optional_field(key, None, decode.optional(decode.float), next)
-}
-
-/// `optional_field(key, default, decoder, next)` — for cases where the
-/// field is optional but you want a non-`Option` default (e.g. `[]` for
-/// arrays).
-pub fn opt_with_default(
-  key: String,
-  default: t,
-  decoder: Decoder(t),
-  next: fn(t) -> Decoder(u),
-) -> Decoder(u) {
-  decode.optional_field(key, default, decoder, next)
 }
 
 /// Decoder helper for `optional_field(key, None, decode.optional(decoder))`
