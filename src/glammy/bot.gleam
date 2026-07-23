@@ -452,9 +452,9 @@ fn run_callback_guard(
 ) -> Nil {
   let outcome =
     run_owned_task(owner_pid, timeout_ms, callback_stop_timeout_ms, fn() {
-      case ffi.try_run(fn() { callback(value) }) {
+      case ffi.try_run_redacted(fn() { callback(value) }) {
         Ok(Nil) -> CallbackCompleted
-        Error(_) -> CallbackCrashed
+        Error(Nil) -> CallbackCrashed
       }
     })
   case outcome {

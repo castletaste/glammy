@@ -24,3 +24,7 @@ pub fn exception_class_name(class: ExceptionClass) -> String {
 /// Run a thunk and preserve either its polymorphic value or a typed exception.
 @external(erlang, "glammy_ffi", "try_run")
 pub fn try_run(operation: fn() -> value) -> Result(value, CaughtException)
+
+/// Run a `Nil` thunk without rendering exception values or stacktraces.
+@external(erlang, "glammy_ffi", "try_run_redacted")
+pub fn try_run_redacted(operation: fn() -> Nil) -> Result(Nil, Nil)

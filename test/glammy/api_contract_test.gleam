@@ -798,7 +798,7 @@ pub fn endpoint_specific_media_options_and_thumbnail_test() {
   let thumb = thumbnail.new(<<1, 2, 3>>, "thumb.jpg", Some("image/jpeg"))
   let document_options =
     media_options.SendDocumentOptions(
-      ..api.default_send_document_options(),
+      ..media_options.default_send_document_options(),
       thumbnail: Some(thumb),
       caption: Some("doc"),
       parse_mode: Some(parse_mode.Html),
@@ -827,7 +827,7 @@ pub fn endpoint_specific_media_options_and_thumbnail_test() {
 
   let video_options =
     media_options.SendVideoOptions(
-      ..api.default_send_video_options(),
+      ..media_options.default_send_video_options(),
       duration: Some(3),
       width: Some(640),
       height: Some(360),
@@ -851,7 +851,7 @@ pub fn endpoint_specific_media_options_and_thumbnail_test() {
       client,
       api.ChatIntId(1),
       video_note,
-      api.default_send_video_note_options(),
+      media_options.default_send_video_note_options(),
     )
   let assert Ok(#("sendVideoNote", api.MultipartPayload(video_note_parts))) =
     helpers.receive_event(recorder)
@@ -859,7 +859,7 @@ pub fn endpoint_specific_media_options_and_thumbnail_test() {
 
   let sticker_options =
     media_options.SendStickerOptions(
-      ..api.default_send_sticker_options(),
+      ..media_options.default_send_sticker_options(),
       emoji: Some("⭐"),
     )
   let assert Ok(_) =

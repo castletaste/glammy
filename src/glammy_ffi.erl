@@ -3,7 +3,7 @@
 %%% clean.
 
 -module(glammy_ffi).
--export([try_run/1]).
+-export([try_run/1, try_run_redacted/1]).
 
 %% Run a thunk and catch synchronous error/exit/throw exceptions. Preserve the
 %% successful value and return a typed, safely rendered caught exception.
@@ -18,6 +18,17 @@ try_run(F) ->
                     exception_class(Class),
                     format_term(Reason),
                     format_term(Stack)}}
+    end.
+
+%% Callback diagnostics intentionally discard application exception details.
+%% Keep this path allocation-light and do not render potentially secret terms.
+try_run_redacted(F) ->
+    try
+        F(),
+        {ok, nil}
+    catch
+        _:_ ->
+            {error, nil}
     end.
 
 exception_class(error) -> error_class;

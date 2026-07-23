@@ -220,9 +220,11 @@ requires without directly comparing the secret values.
 
 ## D-12. `error_boundary` uses Erlang FFI for try/catch
 
-**Decision:** `glammy/internal/ffi.try_run` exposes a typed, polymorphic result
-over `glammy_ffi.erl::try_run/1`, which wraps a Gleam thunk in Erlang's
-`try Class:Reason:Stack`. Gleam itself has no try/catch.
+**Decision:** `glammy/internal/ffi.gleam` exposes one typed exception boundary
+backed by `glammy_ffi.erl`. `try_run` preserves a thunk's polymorphic success
+value and maps Erlang's closed `error | exit | throw` classes into a Gleam sum
+type. `try_run_redacted` catches callback failures without rendering potentially
+sensitive reasons or stacktraces. Gleam itself has no try/catch.
 
 **Why:** Without FFI, we can't catch:
 - `panic as "..."`
@@ -236,7 +238,8 @@ per-update isolation worker. Webhooks have recommended isolated helpers with
 typed timeout/failure results; the synchronous helpers are an explicit opt-in
 for hosts that deliberately own the process boundary.
 
-**Surface area:** one internal Gleam module and one Erlang entry point. Audited.
+**Surface area:** two small Erlang functions plus one closed class mapper.
+Audited and covered by direct FFI tests.
 
 ## D-13. Conversations use chat:user keys and non-blocking workers
 

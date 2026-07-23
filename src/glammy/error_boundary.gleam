@@ -22,7 +22,6 @@ pub type BoundaryClass {
   ErrorClass
   ExitClass
   ThrowClass
-  OtherClass(String)
 }
 
 /// A safely rendered BEAM failure captured by an error boundary.
@@ -44,11 +43,8 @@ pub fn boundary(
   fn(ctx: Context, next: fn() -> Nil) -> Nil {
     case ffi.try_run(fn() { composer.run(inner, ctx) }) {
       Ok(_) -> Nil
-      Error(ffi.CaughtException(class:, value:, stacktrace: stack)) ->
-        on_error(
-          ctx,
-          Caught(class: boundary_class(class), value:, stacktrace: stack),
-        )
+      Error(ffi.CaughtException(class:, value:, stacktrace:)) ->
+        on_error(ctx, Caught(class: boundary_class(class), value:, stacktrace:))
     }
     next()
   }
