@@ -73,16 +73,3 @@ pub fn message_update(text: String, chat_id: Int) -> Update {
     <> "\"}}"
   update_from(body)
 }
-
-/// Builds a private-chat text-message update that also carries a
-/// `from` field with the given user id — for tests that key state off
-/// the sending user (e.g. conversations).
-pub fn message_update_from(text: String, from_id: Int) -> Update {
-  let body =
-    "{\"update_id\":1,\"message\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":0,\"text\":\""
-    <> text
-    <> "\",\"from\":{\"id\":"
-    <> int.to_string(from_id)
-    <> ",\"is_bot\":false,\"first_name\":\"X\"}}}"
-  update_from(body)
-}

@@ -221,24 +221,18 @@ fn message_reply_fields(
   let fields = [#("message_id", json.int(message_id))]
   let fields = case quote {
     None -> fields
-    Some(ReplyQuote(text:, parse_mode: quote_parse_mode, position:)) ->
+    Some(ReplyQuote(text:, parse_mode: quote_parse_mode, position:)) -> {
+      let fields = [#("quote", json.string(text)), ..fields]
       fields
-      |> list_prepend(#("quote", json.string(text)))
       |> json_utils.put_optional("quote_parse_mode", quote_parse_mode, fn(mode) {
         json.string(parse_mode.to_string(mode))
       })
       |> json_utils.put_optional("quote_position", position, json.int)
+    }
   }
   fields
   |> json_utils.put_optional("checklist_task_id", checklist_task_id, json.int)
   |> json_utils.put_optional("poll_option_id", poll_option_id, json.string)
-}
-
-fn list_prepend(
-  fields: List(#(String, json.Json)),
-  field: #(String, json.Json),
-) -> List(#(String, json.Json)) {
-  [field, ..fields]
 }
 
 fn list_prepend_chat_id(

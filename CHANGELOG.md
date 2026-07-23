@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-07-17
-
 ### Added
 
 - Initial pre-release implementation: typed API client plus generic `call`,
@@ -66,6 +64,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed redundant raw compatibility aliases where finite Gleam types already
+  provide the canonical outbound representation (`parse_mode`, `chat_action`,
+  typed poll/dice values, and `BotCommandScope`). Media-option defaults now live
+  only in `glammy/media_options`, beside their owning types.
+- Removed the unused `keyed_executor.submit_with_key` wrapper; derive the key
+  explicitly and call `submit`, or use the context-aware `update_gate`.
+- Centralized Erlang exception handling behind a typed internal FFI module,
+  preserving polymorphic success values without self-mailbox adapters and
+  redacting callback failures before formatting. `BoundaryClass.OtherClass`
+  was removed; exhaustive matches now cover only `ErrorClass`, `ExitClass`, and
+  `ThrowClass`.
 - DRY/KISS refactor across the public framework surface before Hex publication.
 - Bot tokens are redacted from generic inspection of `api.Api`; the explicit
   `to_http_request` boundary still places the token in Telegram's required URL.
@@ -111,70 +120,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has already continued.
 - `MessageEntity` decodes Bot API 10.2 `date_time` metadata and the filter DSL
   accepts `message:entities:date_time` and `::date_time`.
-
-### Breaking
-
-- `ChatMemberAdministrator.can_post_stories`, `can_edit_stories`, and
-  `can_delete_stories` are required `Bool` fields, matching Bot API 10.2;
-  administrator payloads missing any of them now fail decoding.
-- The misnamed `inline_query_results.sticker` builder, which represented no Bot
-  API type and duplicated `cached_sticker`, was removed.
-  `cached_sticker` is now the single Bot API-aligned builder and accepts the
-  official optional `input_message_content` field.
-- `composer.chat_type` now takes `types.ChatType` instead of `String`.
-- `api.with_timeout` validates positive BEAM-safe values and returns
-  `Result(Api, ApiConfigError)`, including `TimeoutTooLarge` above the finite
-  timer ceiling.
-- Webhook/update JSON parsing returns typed `JsonParseError`; HTTP status and
-  transport failures retain their typed error variants.
-- Raw `String`/`json.Json` parameters in typed send, poll, command, keyboard,
-  reaction, inline, shipping, and media APIs were replaced by finite types,
-  records, opaque validated values, or explicit sum types. Use the
-  `prepare_json_call` / `prepare_multipart_call` family for intentional
-  low-level extensions.
-- Poll sending now requires a plain, non-blank, at-most-300-codepoint
-  `types.PollQuestion` and one opaque `SendPoll` built with
-  `regular_poll(options)` or
-  `quiz_poll(options, first_id, other_ids, explanation)`. Plain poll options
-  are validated to be non-blank and contain at most 100 codepoints; quiz
-  identifiers are non-negative, increasing, and bounded by those exact 1–12
-  options. Quiz-only explanation and general description limits are carried by
-  opaque values. Parsed/entity poll text uses the prepared-call escape hatch.
-  Reactions accept only clear or one typed reaction.
-- `set_my_commands` accepts an at-most-100 `types.BotCommands` collection;
-  invite-link create/edit accept only validated `ChatInviteLinkOptions`; and
-  webhook/Mini App/login-button HTTPS fields accept `https_url.HttpsUrl`.
-- `forward_messages` accepts only a strictly increasing
-  `api.ForwardMessageIds`; unordered positive batches remain valid for
-  `delete_messages` through `api.MessageIds`.
-- `answer_inline_query` accepts an at-most-50 opaque result collection, inline
-  video/document MIME states are finite, and `send_video_note` accepts only a
-  URL-free opaque `FileIdOrUpload` built by `input_file.file_id_source` or
-  `input_file.upload_source`.
-- Game and Pay buttons no longer exist in the general `InlineKeyboard` type.
-  Use `game_inline_keyboard*` only with `send_game_with_options` or
-  `inline_query_results.game`, and `invoice_inline_keyboard*` only in
-  `SendInvoiceOptions.reply_markup`.
-- Webhook registration and verification share one validated, inspection-safe
-  `WebhookSecret` value.
-- `keyed_executor.Options` now requires `job_timeout_ms`, and accepted jobs can
-  finish with `JobOutcome.TimedOut`. The default deadline is five minutes.
-- Abrupt keyed-executor death now waits through the pre-task attachment window
-  and confirms the real user-operation process is down before publishing
-  `ExecutorTerminated`.
-- Keyboard button unions gained copy/decorator variants. Exhaustive downstream
-  matches must handle them; use the decorator helpers to preserve one action.
-- `InputFile` no longer has a local-path variant, and media thumbnails accept
-  only the upload-backed `Thumbnail` type.
-- `Message.pinned_message` and `CallbackQuery.message` now use
-  `MaybeInaccessibleMessage`. Match `AccessibleMessage(message)` before reading
-  message content, or `InaccessibleMessage(chat:, message_id:)` for the minimal
-  deleted-message shape. Context chat/id aggregators support both variants.
-- `CallbackQuery.data` and `game_short_name` were replaced by the required
-  `payload: CallbackPayload`; match `Data(value)` or `Game(short_name)` instead
-  of handling two independent optional fields.
-- `Update` now carries `raw: Option(RawObject)`; use `types.new_update` for
-  application-owned updates without an original Telegram envelope.
 
 ### Known limitations
 
