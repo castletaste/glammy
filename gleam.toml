@@ -1,5 +1,5 @@
 name = "glammy"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Telegram Bot Framework for Gleam — a port of grammY (https://github.com/grammyjs/grammY)."
 licences = ["MIT"]
 gleam = ">= 1.16.0"
@@ -45,6 +45,11 @@ source = "./docs/roadmap.md"
 title = "Releasing"
 path = "releasing.html"
 source = "./docs/releasing.md"
+
+[[documentation.pages]]
+title = "Migrating to 0.2.0"
+path = "migrating-to-0-2-0.html"
+source = "./docs/migrating-to-0.2.0.md"
 
 # Runtime dependency ranges are bounded and packages come from the official
 # `gleam-lang` GitHub organisation. The dev-only `gleeunit` runner is maintained

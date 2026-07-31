@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-24
+
 ### Added
 
 - Initial pre-release implementation: typed API client plus generic `call`,
@@ -68,17 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standard-library operations and direct function composition.
 - Conversation middleware now treats every registry error as fail-closed,
   keeping future error variants from leaking updates into ordinary middleware.
-- Removed redundant raw compatibility aliases where finite Gleam types already
-  provide the canonical outbound representation (`parse_mode`, `chat_action`,
-  typed poll/dice values, and `BotCommandScope`). Media-option defaults now live
-  only in `glammy/media_options`, beside their owning types.
-- Removed the unused `keyed_executor.submit_with_key` wrapper; derive the key
-  explicitly and call `submit`, or use the context-aware `update_gate`.
 - Centralized Erlang exception handling behind a typed internal FFI module,
   preserving polymorphic success values without self-mailbox adapters and
-  redacting callback failures before formatting. `BoundaryClass.OtherClass`
-  was removed; exhaustive matches now cover only `ErrorClass`, `ExitClass`, and
-  `ThrowClass`.
+  redacting callback failures before formatting.
 - DRY/KISS refactor across the public framework surface before Hex publication.
 - Bot tokens are redacted from generic inspection of `api.Api`; the explicit
   `to_http_request` boundary still places the token in Telegram's required URL.
@@ -124,6 +118,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has already continued.
 - `MessageEntity` decodes Bot API 10.2 `date_time` metadata and the filter DSL
   accepts `message:entities:date_time` and `::date_time`.
+
+### Removed
+
+These removals are relative only to the unpublished historical 0.1.0 source
+candidate; no 0.1.x Hex release exists.
+
+- Twenty-nine redundant `glammy/constants` aliases for parse modes, chat
+  actions, poll kinds, dice emoji, and command scopes. Use the finite typed
+  values, or the documented literal only for intentional raw payloads.
+- Eight `glammy/api.default_send_*_options` forwarding helpers. Import the
+  identically named defaults from `glammy/media_options`.
+- `keyed_executor.submit_with_key`. Derive the key and call
+  `keyed_executor.submit`, or use `keyed_executor.update_gate`.
+- The `glammy/error_boundary.OtherClass(String)` variant of `BoundaryClass`.
+  Runtime boundaries produce only `ErrorClass`, `ExitClass`, or `ThrowClass`.
+
+The complete 39-symbol replacement guide is in the
+[0.2.0 migration guide](docs/migrating-to-0.2.0.md).
 
 ### Known limitations
 

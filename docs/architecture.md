@@ -364,8 +364,7 @@ application-owned persistence.
 
 - **Naming:** snake_case for fns / types. Variants use PascalCase.
 - **Labelled args** are preferred for ambiguous same-typed public parameters
-  (for example `api.get_updates`). Remaining legacy wrappers are tracked for
-  API cleanup.
+  (for example `api.get_updates`).
 - **Opaque types** for everything stateful (`Api`, `Composer`, `Bot`,
   `Storage`, `Registry`). Construction via `new`/`memory_storage`/etc.
 - **Result returns** for fallible operations. No exceptions in the

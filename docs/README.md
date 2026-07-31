@@ -21,7 +21,7 @@ glammy is a from-scratch port of [grammY](https://github.com/grammyjs/grammY)
 (TypeScript Telegram Bot framework) to [Gleam](https://gleam.run) on the
 BEAM. The implementation is Gleam plus a small, audited Erlang FFI boundary.
 
-**Status:** pre-release 0.1.0 candidate. The authoritative quality gates are
+**Status:** pre-release 0.2.0 candidate. The authoritative quality gates are
 `gleam build --warnings-as-errors`, `gleam test`, the deterministic
 keyed-executor startup-barrier check, `gleam docs build`, the compiled consumer
 project in `examples/echo_bot`, the isolated dependency-floor build in

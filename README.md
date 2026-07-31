@@ -83,7 +83,7 @@ CI, so the quickstart stays aligned with the public API.
 | `glammy/https_url`              | Absolute HTTPS URLs for TLS-only Bot API fields.                      |
 | `glammy/inline_query_results`   | Opaque, typed builders for inline-query results.                      |
 | `glammy/escape`                 | HTML / Markdown / MarkdownV2 escaping for user-provided text.         |
-| `glammy/constants`              | Raw sticker and currency constants without typed equivalents.         |
+| `glammy/constants`              | Raw sticker and currency constants without typed outbound equivalents. |
 
 ## Typed outbound values
 
