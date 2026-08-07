@@ -2187,6 +2187,74 @@ pub fn link_preview_options_to_json(options: LinkPreviewOptions) -> json.Json {
   )
 }
 
+/// Telegram service data emitted when a forum topic is created.
+pub type ForumTopicCreated {
+  ForumTopicCreated(
+    name: String,
+    icon_color: Int,
+    icon_custom_emoji_id: Option(String),
+    is_name_implicit: Option(Bool),
+  )
+}
+
+pub fn forum_topic_created_decoder() -> Decoder(ForumTopicCreated) {
+  use name <- decode.field("name", decode.string)
+  use icon_color <- decode.field("icon_color", decode.int)
+  use icon_custom_emoji_id <- json_utils.opt_str("icon_custom_emoji_id")
+  use is_name_implicit <- json_utils.opt_bool("is_name_implicit")
+  decode.success(ForumTopicCreated(
+    name:,
+    icon_color:,
+    icon_custom_emoji_id:,
+    is_name_implicit:,
+  ))
+}
+
+/// Telegram service data emitted when a forum topic is edited.
+pub type ForumTopicEdited {
+  ForumTopicEdited(name: Option(String), icon_custom_emoji_id: Option(String))
+}
+
+pub fn forum_topic_edited_decoder() -> Decoder(ForumTopicEdited) {
+  use name <- json_utils.opt_str("name")
+  use icon_custom_emoji_id <- json_utils.opt_str("icon_custom_emoji_id")
+  decode.success(ForumTopicEdited(name:, icon_custom_emoji_id:))
+}
+
+pub type ForumTopicClosed {
+  ForumTopicClosed
+}
+
+pub fn forum_topic_closed_decoder() -> Decoder(ForumTopicClosed) {
+  decode.success(ForumTopicClosed)
+}
+
+pub type ForumTopicReopened {
+  ForumTopicReopened
+}
+
+pub fn forum_topic_reopened_decoder() -> Decoder(ForumTopicReopened) {
+  decode.success(ForumTopicReopened)
+}
+
+pub type GeneralForumTopicHidden {
+  GeneralForumTopicHidden
+}
+
+pub fn general_forum_topic_hidden_decoder() -> Decoder(GeneralForumTopicHidden) {
+  decode.success(GeneralForumTopicHidden)
+}
+
+pub type GeneralForumTopicUnhidden {
+  GeneralForumTopicUnhidden
+}
+
+pub fn general_forum_topic_unhidden_decoder() -> Decoder(
+  GeneralForumTopicUnhidden,
+) {
+  decode.success(GeneralForumTopicUnhidden)
+}
+
 // =====================================================================
 //                                Message
 // =====================================================================
@@ -2247,6 +2315,12 @@ pub type Message {
     contact: Option(Contact),
     dice: Option(Dice),
     poll: Option(Poll),
+    forum_topic_created: Option(ForumTopicCreated),
+    forum_topic_edited: Option(ForumTopicEdited),
+    forum_topic_closed: Option(ForumTopicClosed),
+    forum_topic_reopened: Option(ForumTopicReopened),
+    general_forum_topic_hidden: Option(GeneralForumTopicHidden),
+    general_forum_topic_unhidden: Option(GeneralForumTopicUnhidden),
     new_chat_members: List(User),
     left_chat_member: Option(User),
     new_chat_title: Option(String),
@@ -2327,6 +2401,30 @@ pub fn message_decoder() -> Decoder(Message) {
   use contact <- json_utils.opt_nested("contact", contact_decoder())
   use dice <- json_utils.opt_nested("dice", dice_decoder())
   use poll <- json_utils.opt_nested("poll", poll_decoder())
+  use forum_topic_created <- json_utils.opt_nested(
+    "forum_topic_created",
+    forum_topic_created_decoder(),
+  )
+  use forum_topic_edited <- json_utils.opt_nested(
+    "forum_topic_edited",
+    forum_topic_edited_decoder(),
+  )
+  use forum_topic_closed <- json_utils.opt_nested(
+    "forum_topic_closed",
+    forum_topic_closed_decoder(),
+  )
+  use forum_topic_reopened <- json_utils.opt_nested(
+    "forum_topic_reopened",
+    forum_topic_reopened_decoder(),
+  )
+  use general_forum_topic_hidden <- json_utils.opt_nested(
+    "general_forum_topic_hidden",
+    general_forum_topic_hidden_decoder(),
+  )
+  use general_forum_topic_unhidden <- json_utils.opt_nested(
+    "general_forum_topic_unhidden",
+    general_forum_topic_unhidden_decoder(),
+  )
   use new_chat_members <- json_utils.opt_list(
     "new_chat_members",
     user_decoder(),
@@ -2402,6 +2500,12 @@ pub fn message_decoder() -> Decoder(Message) {
     contact:,
     dice:,
     poll:,
+    forum_topic_created:,
+    forum_topic_edited:,
+    forum_topic_closed:,
+    forum_topic_reopened:,
+    general_forum_topic_hidden:,
+    general_forum_topic_unhidden:,
     new_chat_members:,
     left_chat_member:,
     new_chat_title:,

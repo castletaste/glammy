@@ -3375,6 +3375,44 @@ pub fn reopen_forum_topic(
   forum_topic_action(api, "reopenForumTopic", chat_id, message_thread_id)
 }
 
+/// Call Telegram's `editGeneralForumTopic` method.
+pub fn edit_general_forum_topic(
+  api: Api,
+  chat_id: ChatId,
+  name: String,
+) -> Result(Bool, GlammyError) {
+  call(
+    api,
+    "editGeneralForumTopic",
+    [#("chat_id", chat_id_to_json(chat_id)), #("name", json.string(name))],
+    decode.bool,
+  )
+}
+
+fn general_forum_topic_action(
+  api: Api,
+  method: String,
+  chat_id: ChatId,
+) -> Result(Bool, GlammyError) {
+  call(api, method, [#("chat_id", chat_id_to_json(chat_id))], decode.bool)
+}
+
+/// Call Telegram's `closeGeneralForumTopic` method.
+pub fn close_general_forum_topic(
+  api: Api,
+  chat_id: ChatId,
+) -> Result(Bool, GlammyError) {
+  general_forum_topic_action(api, "closeGeneralForumTopic", chat_id)
+}
+
+/// Call Telegram's `reopenGeneralForumTopic` method.
+pub fn reopen_general_forum_topic(
+  api: Api,
+  chat_id: ChatId,
+) -> Result(Bool, GlammyError) {
+  general_forum_topic_action(api, "reopenGeneralForumTopic", chat_id)
+}
+
 /// Call Telegram's `deleteForumTopic` method.
 pub fn delete_forum_topic(
   api: Api,
