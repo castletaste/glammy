@@ -729,6 +729,47 @@ pub fn send_message(
   call(api, "sendMessage", fields, types.message_decoder())
 }
 
+/// Optional fields accepted by Telegram's `sendMessageDraft` method.
+pub type SendMessageDraftOptions {
+  SendMessageDraftOptions(
+    message_thread_id: Option(Int),
+    parse_mode: Option(ParseMode),
+  )
+}
+
+/// Default options for `send_message_draft`.
+pub fn default_send_message_draft_options() -> SendMessageDraftOptions {
+  SendMessageDraftOptions(message_thread_id: None, parse_mode: None)
+}
+
+/// Stream an ephemeral partial message to a private chat.
+///
+/// Telegram requires a non-zero `draft_id`. Reusing the same identifier updates
+/// the existing draft. The completed response must still use `send_message`.
+pub fn send_message_draft(
+  api: Api,
+  chat_id: Int,
+  draft_id: Int,
+  text: String,
+  options options: SendMessageDraftOptions,
+) -> Result(Bool, GlammyError) {
+  let fields =
+    [
+      #("chat_id", json.int(chat_id)),
+      #("draft_id", json.int(draft_id)),
+      #("text", json.string(text)),
+    ]
+    |> json_utils.put_optional(
+      "message_thread_id",
+      options.message_thread_id,
+      json.int,
+    )
+    |> json_utils.put_optional("parse_mode", options.parse_mode, fn(mode) {
+      json.string(parse_mode.to_string(mode))
+    })
+  call(api, "sendMessageDraft", fields, decode.bool)
+}
+
 /// Call Telegram's `forwardMessage` method.
 pub fn forward_message(
   api: Api,

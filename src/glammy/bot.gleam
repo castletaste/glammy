@@ -10,7 +10,7 @@ import glammy/context
 import glammy/error.{type GlammyError}
 import glammy/internal/clock
 import glammy/internal/ffi
-import glammy/types.{type Update}
+import glammy/types.{type Update, WebhookInfo}
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -24,6 +24,15 @@ const handler_stop_timeout_ms = 1000
 const default_callback_timeout_ms = 5000
 
 const callback_stop_timeout_ms = 1000
+
+// After the exact startup backlog is consumed, bound repeated reconciliation
+// signals even when incoming traffic continuously refills every request.
+const catch_up_batch_interval = 8
+
+type CatchUpState {
+  InitialCatchUp(updates_remaining: Int)
+  CatchUpCooldown(nonempty_batches_remaining: Int)
+}
 
 /// Controls whether long polling continues after an update handler fails.
 pub type HandlerFailurePolicy {
@@ -108,6 +117,15 @@ pub type BotConfigError {
   InvalidCallbackTimeout(Int)
 }
 
+/// Safe observation points for polling health and recovery coordination.
+pub type PollEvent {
+  PollSucceeded
+  PollCaughtUp
+  PollRetryScheduled(error: GlammyError, attempt: Int, backoff_ms: Int)
+  PollCheckpointFailed(error: GlammyError)
+  PollStopped(error: GlammyError)
+}
+
 /// Default long-polling options.
 pub fn default_polling_options() -> PollingOptions {
   PollingOptions(
@@ -129,6 +147,8 @@ pub opaque type Bot {
     update_gates: List(UpdateGate),
     error_handler: fn(GlammyError) -> Nil,
     runtime_error_handler: fn(BotRuntimeError) -> Nil,
+    poll_event_handler: fn(PollEvent) -> Nil,
+    poll_events_enabled: Bool,
     callback_timeout_ms: Int,
   )
 }
@@ -141,6 +161,8 @@ pub fn new(api: Api, composer: Composer) -> Bot {
     update_gates: [],
     error_handler: default_error_handler,
     runtime_error_handler: default_runtime_error_handler,
+    poll_event_handler: fn(_) { Nil },
+    poll_events_enabled: False,
     callback_timeout_ms: default_callback_timeout_ms,
   )
 }
@@ -193,6 +215,12 @@ pub fn on_error(bot: Bot, handler: fn(GlammyError) -> Nil) -> Bot {
 /// application code.
 pub fn on_runtime_error(bot: Bot, handler: fn(BotRuntimeError) -> Nil) -> Bot {
   Bot(..bot, runtime_error_handler: handler)
+}
+
+/// Observe already-decided long-poll success, retry, checkpoint, and stop
+/// outcomes. The callback is isolated and cannot change polling decisions.
+pub fn on_poll_event(bot: Bot, handler: fn(PollEvent) -> Nil) -> Bot {
+  Bot(..bot, poll_event_handler: handler, poll_events_enabled: True)
 }
 
 fn default_error_handler(error_value: GlammyError) -> Nil {
@@ -509,6 +537,15 @@ fn report_runtime_error(bot: Bot, error_value: BotRuntimeError) -> Nil {
   )
 }
 
+fn report_poll_event(bot: Bot, event: PollEvent) -> Nil {
+  run_callback_safely(
+    bot.poll_event_handler,
+    event,
+    "poll event",
+    bot.callback_timeout_ms,
+  )
+}
+
 /// Dispatch one parsed update synchronously.
 ///
 /// Webhook adapters that need panic isolation should use
@@ -729,7 +766,19 @@ pub fn start(bot: Bot, options: PollingOptions) -> Result(Nil, BotError) {
     True -> drain_pending(bot, options)
     False -> Ok(None)
   })
-  poll_loop(bot, options, initial_offset, 0)
+  use initial_backlog_size <- result.try(
+    case options.drop_pending_updates || !bot.poll_events_enabled {
+      True -> Ok(0)
+      False -> startup_backlog_size(bot)
+    },
+  )
+  poll_loop(
+    bot,
+    options,
+    initial_offset,
+    0,
+    InitialCatchUp(initial_backlog_size),
+  )
 }
 
 fn validate_options(options: PollingOptions) -> Result(Nil, BotError) {
@@ -786,6 +835,16 @@ fn drain_pending(
   |> Ok
 }
 
+fn startup_backlog_size(bot: Bot) -> Result(Int, BotError) {
+  use info <- result.try(retry_startup_api_call(
+    bot,
+    fn() { api.get_webhook_info(bot.api) },
+    0,
+  ))
+  let WebhookInfo(pending_update_count:, ..) = info
+  Ok(pending_update_count)
+}
+
 fn retry_startup_api_call(
   bot: Bot,
   operation: fn() -> Result(value, GlammyError),
@@ -796,8 +855,15 @@ fn retry_startup_api_call(
     Error(error_value) -> {
       report_error(bot, error_value)
       case retry_delay_ms(error_value, attempt) {
-        None -> Error(ApiFailure(error_value))
+        None -> {
+          report_poll_event(bot, PollStopped(error_value))
+          Error(ApiFailure(error_value))
+        }
         Some(delay_ms) -> {
+          report_poll_event(
+            bot,
+            PollRetryScheduled(error_value, attempt + 1, delay_ms),
+          )
           process.sleep(delay_ms)
           retry_startup_api_call(bot, operation, attempt + 1)
         }
@@ -811,6 +877,7 @@ fn poll_loop(
   options: PollingOptions,
   offset: Option(Int),
   consecutive_errors: Int,
+  catch_up_state: CatchUpState,
 ) -> Result(Nil, BotError) {
   case
     api.get_updates(
@@ -828,7 +895,10 @@ fn poll_loop(
             last_update_id(updates)
             |> option.map(fn(id) { id + 1 })
             |> option.or(offset)
-          poll_loop(bot, options, next_offset, 0)
+          report_poll_event(bot, PollSucceeded)
+          let next_catch_up_state =
+            advance_catch_up(bot, updates, catch_up_state)
+          poll_loop(bot, options, next_offset, 0, next_catch_up_state)
         }
         Error(UpdateBatchFailure(runtime_error:, checkpoint_offset: None)) ->
           Error(UpdateHandlerFailure(runtime_error))
@@ -847,14 +917,64 @@ fn poll_loop(
     Error(error_value) -> {
       report_error(bot, error_value)
       case retry_delay_ms(error_value, consecutive_errors) {
-        None -> Error(ApiFailure(error_value))
+        None -> {
+          report_poll_event(bot, PollStopped(error_value))
+          Error(ApiFailure(error_value))
+        }
         Some(delay_ms) -> {
+          report_poll_event(
+            bot,
+            PollRetryScheduled(error_value, consecutive_errors + 1, delay_ms),
+          )
           process.sleep(delay_ms)
-          poll_loop(bot, options, offset, consecutive_errors + 1)
+          poll_loop(
+            bot,
+            options,
+            offset,
+            consecutive_errors + 1,
+            catch_up_state,
+          )
         }
       }
     }
   }
+}
+
+fn advance_catch_up(
+  bot: Bot,
+  updates: List(Update),
+  state: CatchUpState,
+) -> CatchUpState {
+  case updates {
+    [] -> {
+      report_poll_event(bot, PollCaughtUp)
+      CatchUpCooldown(catch_up_batch_interval)
+    }
+    [_, ..] ->
+      case state {
+        InitialCatchUp(updates_remaining) -> {
+          let updates_remaining = updates_remaining - list.length(updates)
+          case updates_remaining <= 0 {
+            True -> publish_bounded_catch_up(bot)
+            False -> InitialCatchUp(updates_remaining)
+          }
+        }
+        CatchUpCooldown(nonempty_batches_remaining) ->
+          advance_catch_up_countdown(bot, nonempty_batches_remaining)
+      }
+  }
+}
+
+fn advance_catch_up_countdown(bot: Bot, remaining: Int) -> CatchUpState {
+  case remaining <= 1 {
+    True -> publish_bounded_catch_up(bot)
+    False -> CatchUpCooldown(remaining - 1)
+  }
+}
+
+fn publish_bounded_catch_up(bot: Bot) -> CatchUpState {
+  report_poll_event(bot, PollCaughtUp)
+  CatchUpCooldown(catch_up_batch_interval)
 }
 
 type UpdateBatchFailure {
@@ -953,6 +1073,7 @@ fn checkpoint_successful_prefix(
     Ok(_) -> Error(UpdateHandlerFailure(runtime_error))
     Error(checkpoint_failure) -> {
       report_error(bot, checkpoint_failure)
+      report_poll_event(bot, PollCheckpointFailed(checkpoint_failure))
       Error(UpdateCheckpointFailure(runtime_error, checkpoint_failure))
     }
   }
