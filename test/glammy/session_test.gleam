@@ -268,9 +268,7 @@ pub fn session_backend_panic_after_commit_is_unknown_and_skips_effect_test() {
 pub fn update_handler_panics_are_typed_errors_test() {
   let storage: session.Storage(Int) = memory_storage()
   let result =
-    session.storage_update(storage, "k", 0, fn(_) {
-      panic as "handler exploded"
-    })
+    session.storage_update(storage, "k", 0, fn(_) { panic as "handler exploded" })
   case result {
     Error(error) -> {
       let description = string.inspect(error)

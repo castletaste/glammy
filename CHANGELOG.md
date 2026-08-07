@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-07-24
+## [0.2.0] - 2026-08-07
 
 ### Added
 
 - Initial pre-release implementation: typed API client plus generic `call`,
   composer middleware, filter DSL, sessions, conversations, keyboards, inline
   query results, webhook adapter, transformers, and long-polling runner.
+- Isolated `bot.on_poll_event` callbacks for successful polls, initial
+  catch-up, scheduled retries, checkpoint failures, and terminal stops. The
+  default polling path keeps its previous startup requests and side effects
+  when no callback is configured.
+- Typed `sendMessageDraft` support for native Telegram streaming previews.
+- Forum-topic service fields on `Message` plus typed edit, close, and reopen
+  operations for the General topic.
 - Opaque `api.PreparedCall(value)` with standard `gleam/http` request building
   and response parsing for application-owned HTTP transports.
 - Compact top-level `glammy` facade for the common client, composer, reply, and

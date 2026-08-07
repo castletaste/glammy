@@ -4,7 +4,7 @@ A Telegram Bot Framework for [Gleam](https://gleam.run) — a from-scratch
 port of [grammY](https://github.com/grammyjs/grammY) (the TypeScript
 framework) to the BEAM virtual machine.
 
-When the initial Hex release is available, install glammy with:
+Install glammy from Hex with:
 
 ```sh
 gleam add glammy
